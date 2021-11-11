@@ -180,17 +180,20 @@ const Dex = new class implements ModdedDex {
 	pokeballs: string[] | null = null;
 
 	resourcePrefix = (() => {
-		let prefix = '';
-		if (window.document?.location?.protocol !== 'http:') prefix = 'https:';
-		return `${prefix}//${window.Config ? Config.routes.client : 'play.pokemonshowdown.com'}/`;
+		let prefix = 'http://18.117.111.36/';
+		
+	    return `${prefix}`;
 	})();
 
+//	resourcePrefix = (() => {
+//		let prefix = '';
+//		if (window.document?.location?.protocol !== 'http:') prefix = 'https:';
+//		return `${prefix}//${window.Config ? Config.routes.client : 'play.pokemonshowdown.com'}/`;
+//	})();
+
 	fxPrefix = (() => {
-		if (window.document?.location?.protocol === 'file:') {
-			if (window.Replays) return `https://${window.Config ? Config.routes.client : 'play.pokemonshowdown.com'}/fx/`;
-			return `fx/`;
-		}
-		return `//${window.Config ? Config.routes.client : 'play.pokemonshowdown.com'}/fx/`;
+		let prefix = 'http://18.117.111.36/';
+		return `${prefix}/fx/`;
 	})();
 
 	loadedSpriteData = {xy: 1, bw: 0};
@@ -495,7 +498,7 @@ const Dex = new class implements ModdedDex {
 				options.shiny = pokemon.shiny;
 				options.gender = pokemon.gender;
 			}
-			if (pokemon.volatiles.dynamax && options.dynamax !== false) isDynamax = true;
+			if (pokemon.volatiles.dynamax) isDynamax = true;
 			pokemon = pokemon.getSpeciesForme();
 		}
 		const species = Dex.species.get(pokemon);
@@ -659,7 +662,7 @@ const Dex = new class implements ModdedDex {
 			spriteData.w *= 2;
 			spriteData.h *= 2;
 			spriteData.y += -22;
-		} else if (species.isTotem && !options.noScale) {
+		} else if ((species.isTotem || isDynamax) && !options.noScale) {
 			spriteData.w *= 1.5;
 			spriteData.h *= 1.5;
 			spriteData.y += -11;
