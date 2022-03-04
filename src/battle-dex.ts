@@ -183,14 +183,17 @@ const Dex = new class implements ModdedDex {
 		let prefix = '';
 		if (window.document?.location?.protocol !== 'http:') prefix = 'https:';
 		return `${prefix}//${window.Config ? Config.routes.client : 'play.pokemonshowdown.com'}/`;
+    // ksnurl
 	})();
 
 	fxPrefix = (() => {
 		if (window.document?.location?.protocol === 'file:') {
 			if (window.Replays) return `https://${window.Config ? Config.routes.client : 'play.pokemonshowdown.com'}/fx/`;
+      // ksnurl
 			return `fx/`;
 		}
 		return `//${window.Config ? Config.routes.client : 'play.pokemonshowdown.com'}/fx/`;
+    // ksnurl
 	})();
 
 	loadedSpriteData = {xy: 1, bw: 0};

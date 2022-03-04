@@ -117,8 +117,9 @@ function updateURL(a, b, c, d) {
 	c = c.replace('/replay.pokemonshowdown.com/', '/' + routes.replays + '/');
 	c = c.replace('/dex.pokemonshowdown.com/', '/' + routes.dex + '/');
 	c = c.replace('/play.pokemonshowdown.com/', '/' + routes.client + '/');
+ //ksnurl
 	c = c.replace('/pokemonshowdown.com/', '/' + routes.root + '/');
-
+//ksnurl
 	if (d) {
 		let hash = Math.random(); // just in case creating the hash fails
 		try {
@@ -158,6 +159,7 @@ function updateFiles() {
 	console.log("DONE");
 
 	// add news, only if it's actually likely to exist
+  //ksnurl
 	if (__dirname.endsWith('play.pokemonshowdown.com/build-tools')) {
 		process.stdout.write("Updating news... ");
 		child_process.exec('php ' + path.resolve(thisDir, 'news-data.php'), function (error, stdout, stderr) {

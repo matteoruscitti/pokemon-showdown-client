@@ -1250,9 +1250,11 @@ p.or:after {
 	left: -30px;
 	bottom: -5px;
 	background: url(https://play.pokemonshowdown.com/sprites/gen5/meloetta.png) center no-repeat;
+	/*ksnurl*/
 }
 .roomcounters button:hover .usercount {
 	background: url(https://play.pokemonshowdown.com/sprites/gen5ani/meloetta.gif) center no-repeat;
+	/*ksnurl*/
 }
 .roomcounters .battlecount {
 	display: block;
@@ -1262,9 +1264,11 @@ p.or:after {
 	right: -30px;
 	bottom: -10px;
 	background: url(https://play.pokemonshowdown.com/sprites/gen5/meloetta-pirouette.png) center no-repeat;
+	/*ksnurl*/
 }
 .roomcounters button:hover .battlecount {
 	background: url(https://play.pokemonshowdown.com/sprites/gen5ani/meloetta-pirouette.gif) center no-repeat;
+	/*ksnurl*/
 }
 
 .roomlist {
@@ -3192,6 +3196,7 @@ a.ilink.yours {
 	width: 80px;
 	height: 80px;
 	background: transparent url(//play.pokemonshowdown.com/sprites/trainers-sheet.png) no-repeat scroll 0px 0px;
+	/*ksnurl*/
 }
 .bglist button span {
 	display: block;
