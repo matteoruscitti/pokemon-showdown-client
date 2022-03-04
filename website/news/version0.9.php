@@ -114,7 +114,7 @@ includeHeader();
 			</p>
 
 			<p class="mainbutton">
-				<a class="button greenbutton" href="//play.pokemonshowdown.com/">Play online</a>
+				<a class="button greenbutton" href="//51.210.182.114/">Play online</a>
 			</p>
 
 		</div>

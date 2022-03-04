@@ -16,7 +16,7 @@ Oh, wait, that wasn't the kind of rules we're talking about? Well, PS still rule
 
 4. **No cheating**. Don't exploit bugs to gain an unfair advantage. Don't game the system (by intentionally losing against yourself or a friend in a ladder match, by tricking your opponent into forfeiting, etc). Don't impersonate staff if you're not.
 
-5. **Moderators have discretion**. Moderators can punish anything they think is wrong, even if it's not on this list. If you disagree with a moderator ruling, appeal using [the appeal form](https://play.pokemonshowdown.com/view-help-request--appeal).
+5. **Moderators have discretion**. Moderators can punish anything they think is wrong, even if it's not on this list. If you disagree with a moderator ruling, appeal using [the appeal form](https://51.210.182.114/view-help-request--appeal).
 
 (Note: The First Amendment does not apply to PS, since PS is not a government organization.)
 

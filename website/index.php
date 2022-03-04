@@ -143,15 +143,15 @@ includeHeaderBottom();
 					or<br /><a href="https://<?= $psconfig['routes']['root'] ?>/autodownload/mac">Install <small>(OS X)</small></a>
 				</p>
 				<!--p class="mainbutton" id="chrome-install" style="display:none">
-					<a class="button greenbutton" href="http://play.pokemonshowdown.com/showdown.crx">Install Chrome app</a>
+					<a class="button greenbutton" href="http://51.210.182.114/showdown.crx">Install Chrome app</a>
 				</p>
 				<p class="mainbutton" id="firefox-install" style="display:none">
-					<button class="button greenbutton" onclick="navigator.mozApps.install('http://play.pokemonshowdown.com/showdown.webapp');return false">Install Firefox app</button>
+					<button class="button greenbutton" onclick="navigator.mozApps.install('http://51.210.182.114/showdown.webapp');return false">Install Firefox app</button>
 				</p-->
 				<div id="install-after"></div>
 				<!--div class="error">
 					<p>Pok&eacute;mon Showdown is offline due to a DDoS attack!</p>
-					<p><span class="pokemonicon" style="display:block;height:24px;width:32px;background:transparent url(//play.pokemonshowdown.com/sprites/bwicons-sheet.png?v0.8.5) no-repeat scroll -288px -424px"></span> Bear with us as we freak out.</p>
+					<p><span class="pokemonicon" style="display:block;height:24px;width:32px;background:transparent url(//51.210.182.114/sprites/bwicons-sheet.png?v0.8.5) no-repeat scroll -288px -424px"></span> Bear with us as we freak out.</p>
 					<p>(We'll be back up in a few hours.)</p>
 				</div-->
 				<script>
@@ -261,11 +261,11 @@ BrowserDetect.init();
 				if (BrowserDetect.OS === 'Mac') {
 					// document.getElementById('play-online').style.display = 'none';
 					document.getElementById('mac-install').style.display = 'block';
-					// document.getElementById('install-after').innerHTML = '<p style="text-align:center;color:#777;margin:-10px 0 -0px 0"><small><em>or</em></small></p><p class="subtle" style="text-align:center"><a href="//play.pokemonshowdown.com/" class="button" style="padding:9px 24px"><strong>Play online</strong></a></p>';
+					// document.getElementById('install-after').innerHTML = '<p style="text-align:center;color:#777;margin:-10px 0 -0px 0"><small><em>or</em></small></p><p class="subtle" style="text-align:center"><a href="//51.210.182.114/" class="button" style="padding:9px 24px"><strong>Play online</strong></a></p>';
 				} else if (BrowserDetect.OS === 'Windows') {
 					// document.getElementById('play-online').style.display = 'none';
 					document.getElementById('win-install').style.display = 'block';
-					// document.getElementById('install-after').innerHTML = '<p style="text-align:center;color:#777;margin:-10px 0 -0px 0"><small><em>or</em></small></p><p class="subtle" style="text-align:center"><a href="//play.pokemonshowdown.com/" class="button" style="padding:9px 24px"><strong>Play online</strong></a></p>';
+					// document.getElementById('install-after').innerHTML = '<p style="text-align:center;color:#777;margin:-10px 0 -0px 0"><small><em>or</em></small></p><p class="subtle" style="text-align:center"><a href="//51.210.182.114/" class="button" style="padding:9px 24px"><strong>Play online</strong></a></p>';
 				}
 
 				-->
