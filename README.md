@@ -1,10 +1,10 @@
-Pokémon Showdown Client
+Pokémon Showdown New Meta Client
 ========================================================================
 
-Navigation: [Website][1] | [Server repository][2] | **Client repository** | [Dex repository][3]
+Navigation: [Website][1] | [Server repository][2] | **Client repository** | [Dex repository (the Zarel one)][3]
 
-  [1]: http://pokemonshowdown.com/
-  [2]: https://github.com/Zarel/Pokemon-Showdown
+  [1]: http://51.210.182.114/?~~51.210.182.114:8000
+  [2]: https://github.com/matteoruscitti/pokemon-showdown
   [3]: https://github.com/Zarel/Pokemon-Showdown-Dex
 
 Introduction
@@ -17,7 +17,7 @@ This is what runs `play.pokemonshowdown.com`.
 **WARNING: You probably want the [Pokémon Showdown server][4]**, if you're
 setting up a server.
 
-  [4]: https://github.com/Zarel/Pokemon-Showdown
+  [4]: https://github.com/matteoruscitti/pokemon-showdown
 
 Browser support
 ------------------------------------------------------------------------
