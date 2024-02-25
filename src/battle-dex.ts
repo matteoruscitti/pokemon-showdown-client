@@ -185,19 +185,19 @@ const Dex = new class implements ModdedDex {
 	    return `${prefix}`;
 	})();
 
-//	resourcePrefix = (() => {
-//		let prefix = '';
-//		if (window.document?.location?.protocol !== 'http:') prefix = 'https:';
-//		return `${prefix}//${window.Config ? Config.routes.client : 'play.pokemonshowdown.com'}/`;
-//	})();
+resourcePrefix = 'https://raw.githubusercontent.com/SanjiTheLord/cobblesouls-showdown-Sprites/master/'
 
-	fxPrefix = (() => {
-		let prefix = 'http://18.117.111.36/';
-		return `${prefix}/fx/`;
-	})();
+/**
+    fxPrefix = (() => {
+        const protocol = (window.document?.location?.protocol !== 'http:') ? 'https:' : '';
+        return `${protocol}//${window.Config ? Config.routes.client : 'play.pokemonshowdown.com'}/fx/`;
+    })();
+*/
 
-	loadedSpriteData = {xy: 1, bw: 0};
-	moddedDexes: {[mod: string]: ModdedDex} = {};
+fxPrefix = 'https://raw.githubusercontent.com/SanjiTheLord/cobblesouls-showdown-Sprites/master/fx/'
+
+    loadedSpriteData = {xy: 1, bw: 0};
+    moddedDexes: {[mod: string]: ModdedDex} = {};
 
 	mod(modid: ID): ModdedDex {
 		if (modid === 'gen8') return this;
