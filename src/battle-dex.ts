@@ -178,13 +178,13 @@ const Dex = new class implements ModdedDex {
 	readonly statNamesExceptHP: ReadonlyArray<StatNameExceptHP> = ['atk', 'def', 'spa', 'spd', 'spe'];
 
 	pokeballs: string[] | null = null;
-
+/**
 	resourcePrefix = (() => {
-		let prefix = 'http://18.117.111.36/';
-		
-	    return `${prefix}`;
+		let prefix = '';
+		if (window.document?.location?.protocol !== 'http:') prefix = 'https:';
+		return `${prefix}//${window.Config ? Config.routes.client : 'play.pokemonshowdown.com'}/`;
 	})();
-
+*/
 resourcePrefix = 'https://raw.githubusercontent.com/SanjiTheLord/cobblesouls-showdown-Sprites/master/'
 
 /**
