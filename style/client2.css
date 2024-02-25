@@ -13,7 +13,7 @@ body {
 	font-size: 11pt;
 	font-family: Verdana, Helvetica, Arial, sans-serif;
 
-	/* see http://pokemonshowdown.com/credits */
+	/* see https://pokemonshowdown.com/credits */
 	background: #344b6c url(../fx/client-bg-charizards.jpg) no-repeat left center fixed;
 	-webkit-background-size: cover;
 	-moz-background-size: cover;
@@ -36,6 +36,12 @@ body {
 .dark .button.notifying {
 	background: #6BACC5;
 	border-color: #2C9CC1;
+}
+
+.dark .button.notifying.subtle {
+	border-color: #000000;
+	background: #b2d7f7;
+	color: black;
 }
 
 .dark .button.notifying:hover {
@@ -241,6 +247,13 @@ body {
 	border-color: #AA8866;
 	background: #e3c3a3;
 }
+
+.button.notifying.subtle {
+	border-color: #000000;
+	background: #b2d7f7;
+	color: black;
+}
+
 .button.notifying:hover {
 	border-color: #604020;
 	background: #cfaf8f;
@@ -1968,7 +1981,7 @@ a.ilink.yours {
 .avatarlist button {
 	width: 80px;
 	height: 80px;
-	background: transparent url(//play.pokemonshowdown.com/sprites/trainers-sheet.png) no-repeat scroll 0px 0px;
+	background: transparent url(https://play.pokemonshowdown.com/sprites/trainers-sheet.png) no-repeat scroll 0px 0px;
 }
 .bglist button span {
 	display: block;

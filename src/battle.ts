@@ -27,14 +27,17 @@
  * @license MIT
  */
 
-/** [id, element?, ...misc] */
-type EffectState = any[] & {0: ID};
-/** [name, minTimeLeft, maxTimeLeft] */
-type WeatherState = [string, number, number];
-type EffectTable = {[effectid: string]: EffectState};
-type HPColor = 'r' | 'y' | 'g';
+import {BattleSceneStub} from './battle-scene-stub';
+import {BattleLog} from './battle-log';
+import {BattleScene, PokemonSprite, BattleStatusAnims} from './battle-animations';
 
-class Pokemon implements PokemonDetails, PokemonHealth {
+/** [id, element?, ...misc] */
+export type EffectState = any[] & {0: ID};
+/** [name, minTimeLeft, maxTimeLeft] */
+export type WeatherState = [string, number, number];
+export type HPColor = 'r' | 'y' | 'g';
+
+export class Pokemon implements PokemonDetails, PokemonHealth {
 	name = '';
 	speciesForme = '';
 
@@ -91,9 +94,9 @@ class Pokemon implements PokemonDetails, PokemonHealth {
 	boosts: {[stat: string]: number} = {};
 	status: StatusName | 'tox' | '' | '???' = '';
 	statusStage = 0;
-	volatiles: EffectTable = {};
-	turnstatuses: EffectTable = {};
-	movestatuses: EffectTable = {};
+	volatiles: {[effectid: string]: EffectState} = {};
+	turnstatuses: {[effectid: string]: EffectState} = {};
+	movestatuses: {[effectid: string]: EffectState} = {};
 	lastMove = '';
 
 	/** [[moveName, ppUsed]] */
@@ -260,7 +263,7 @@ class Pokemon implements PokemonDetails, PokemonHealth {
 			if (this.checkDetails(details.replace(', shiny', ''))) return true;
 		}
 		// the actual forme was hidden on Team Preview
-		details = details.replace(/(-[A-Za-z0-9]+)?(, |$)/, '-*$2');
+		details = details.replace(/(-[A-Za-z0-9-]+)?(, |$)/, '-*$2');
 		return (details === this.details);
 	}
 	getIdent() {
@@ -329,7 +332,7 @@ class Pokemon implements PokemonDetails, PokemonHealth {
 	}
 	rememberMove(moveName: string, pp = 1, recursionSource?: string) {
 		if (recursionSource === this.ident) return;
-		moveName = Dex.getMove(moveName).name;
+		moveName = Dex.moves.get(moveName).name;
 		if (moveName.charAt(0) === '*') return;
 		if (moveName === 'Struggle') return;
 		if (this.volatiles.transform) {
@@ -348,7 +351,7 @@ class Pokemon implements PokemonDetails, PokemonHealth {
 		this.moveTrack.push([moveName, pp]);
 	}
 	rememberAbility(ability: string, isNotBase?: boolean) {
-		ability = Dex.getAbility(ability).name;
+		ability = Dex.abilities.get(ability).name;
 		this.ability = ability;
 		if (!this.baseAbility && !isNotBase) {
 			this.baseAbility = ability;
@@ -437,6 +440,7 @@ class Pokemon implements PokemonDetails, PokemonHealth {
 			delete this.volatiles['disable'];
 			delete this.volatiles['encore'];
 			delete this.volatiles['foresight'];
+			delete this.volatiles['gmaxchistrike'];
 			delete this.volatiles['imprison'];
 			delete this.volatiles['laserfocus'];
 			delete this.volatiles['mimic'];
@@ -493,7 +497,7 @@ class Pokemon implements PokemonDetails, PokemonHealth {
 		}
 
 		let item = toID(serverPokemon ? serverPokemon.item : this.item);
-		let ability = toID(this.ability || serverPokemon?.ability);
+		let ability = toID(this.effectiveAbility(serverPokemon));
 		if (battle.hasPseudoWeather('Magic Room') || this.volatiles['embargo'] || ability === 'klutz') {
 			item = '' as ID;
 		}
@@ -512,6 +516,16 @@ class Pokemon implements PokemonDetails, PokemonHealth {
 		}
 		return !this.getTypeList(serverPokemon).includes('Flying');
 	}
+	effectiveAbility(serverPokemon?: ServerPokemon) {
+		if (this.fainted || this.volatiles['gastroacid']) return '';
+		const ability = this.side.battle.dex.abilities.get(
+			serverPokemon?.ability || this.ability || serverPokemon?.baseAbility || ''
+		);
+		if (this.side.battle.ngasActive() && !ability.isPermanent) {
+			return '';
+		}
+		return ability.name;
+	}
 	getTypeList(serverPokemon?: ServerPokemon) {
 		const [types, addedType] = this.getTypes(serverPokemon);
 		return addedType ? types.concat(addedType) : types;
@@ -521,10 +535,10 @@ class Pokemon implements PokemonDetails, PokemonHealth {
 			(serverPokemon ? serverPokemon.speciesForme : this.speciesForme);
 	}
 	getSpecies(serverPokemon?: ServerPokemon) {
-		return this.side.battle.dex.getSpecies(this.getSpeciesForme(serverPokemon));
+		return this.side.battle.dex.species.get(this.getSpeciesForme(serverPokemon));
 	}
 	getBaseSpecies() {
-		return this.side.battle.dex.getSpecies(this.speciesForme);
+		return this.side.battle.dex.species.get(this.speciesForme);
 	}
 	reset() {
 		this.clearVolatile();
@@ -560,6 +574,9 @@ class Pokemon implements PokemonDetails, PokemonHealth {
 		}
 		return percentage * maxWidth / 100;
 	}
+	getHPText(precision = 1) {
+		return Pokemon.getHPText(this, precision);
+	}
 	static getHPText(pokemon: PokemonHealth, precision = 1) {
 		if (pokemon.maxhp === 100) return pokemon.hp + '%';
 		if (pokemon.maxhp !== 48) return (100 * pokemon.hp / pokemon.maxhp).toFixed(precision) + '%';
@@ -573,12 +590,15 @@ class Pokemon implements PokemonDetails, PokemonHealth {
 	}
 }
 
-class Side {
+export class Side {
 	battle: Battle;
 	name = '';
 	id = '';
+	sideid: SideID;
 	n: number;
+	isFar: boolean;
 	foe: Side = null!;
+	ally: Side | null = null;
 	avatar: string = 'unknown';
 	rating: string = '';
 	totalPokemon = 6;
@@ -599,7 +619,8 @@ class Side {
 	constructor(battle: Battle, n: number) {
 		this.battle = battle;
 		this.n = n;
-		this.updateSprites();
+		this.sideid = ['p1', 'p2', 'p3', 'p4'][n] as SideID;
+		this.isFar = !!(n % 2);
 	}
 
 	rollTrainerSprites() {
@@ -608,16 +629,16 @@ class Side {
 	}
 
 	behindx(offset: number) {
-		return this.x + (!this.n ? -1 : 1) * offset;
+		return this.x + (!this.isFar ? -1 : 1) * offset;
 	}
 	behindy(offset: number) {
-		return this.y + (!this.n ? 1 : -1) * offset;
+		return this.y + (!this.isFar ? 1 : -1) * offset;
 	}
 	leftof(offset: number) {
-		return (!this.n ? -1 : 1) * offset;
+		return (!this.isFar ? -1 : 1) * offset;
 	}
 	behind(offset: number) {
-		return this.z + (!this.n ? -1 : 1) * offset;
+		return this.z + (!this.isFar ? -1 : 1) * offset;
 	}
 
 	clearPokemon() {
@@ -628,12 +649,7 @@ class Side {
 	}
 	reset() {
 		this.clearPokemon();
-		this.updateSprites();
 		this.sideConditions = {};
-	}
-	updateSprites() {
-		this.z = (this.n ? 200 : 0);
-		this.battle.scene.updateSpritesForSide(this);
 	}
 	setAvatar(avatar: string) {
 		this.avatar = avatar;
@@ -647,7 +663,6 @@ class Side {
 			this.rollTrainerSprites();
 			if (this.foe && this.avatar === this.foe.avatar) this.rollTrainerSprites();
 		}
-		if (this.battle.stagnateCallback) this.battle.stagnateCallback(this.battle);
 	}
 	addSideCondition(effect: Effect) {
 		let condition = effect.id;
@@ -682,16 +697,25 @@ class Side {
 			this.sideConditions[condition] = [effect.name, 1, 5, 0];
 			break;
 		case 'stealthrock':
-			this.sideConditions[condition] = [effect.name, 1, 0, 0];
-			break;
 		case 'spikes':
-			this.sideConditions[condition] = [effect.name, 1, 0, 0];
-			break;
 		case 'toxicspikes':
-			this.sideConditions[condition] = [effect.name, 1, 0, 0];
-			break;
 		case 'stickyweb':
 			this.sideConditions[condition] = [effect.name, 1, 0, 0];
+			break;
+		case 'gmaxwildfire':
+		case 'gmaxvolcalith':
+		case 'gmaxvinelash':
+		case 'gmaxcannonade':
+			this.sideConditions[condition] = [effect.name, 1, 4, 0];
+			break;
+		case 'grasspledge':
+			this.sideConditions[condition] = ['Swamp', 1, 4, 0];
+			break;
+		case 'waterpledge':
+			this.sideConditions[condition] = ['Rainbow', 1, 4, 0];
+			break;
+		case 'firepledge':
+			this.sideConditions[condition] = ['Sea of Fire', 1, 4, 0];
 			break;
 		default:
 			this.sideConditions[condition] = [effect.name, 1, 0, 0];
@@ -799,8 +823,6 @@ class Side {
 		}
 
 		this.battle.scene.animSummon(pokemon, slot);
-
-		if (this.battle.switchCallback) this.battle.switchCallback(this.battle, this);
 	}
 	dragIn(pokemon: Pokemon, slot = pokemon.slot) {
 		let oldpokemon = this.active[slot];
@@ -817,8 +839,6 @@ class Side {
 		pokemon.slot = slot;
 
 		this.battle.scene.animDragIn(pokemon, slot);
-
-		if (this.battle.dragCallback) this.battle.dragCallback(this.battle, this);
 	}
 	replace(pokemon: Pokemon, slot = pokemon.slot) {
 		let oldpokemon = this.active[slot];
@@ -846,8 +866,6 @@ class Side {
 			this.battle.scene.animUnsummon(oldpokemon, true);
 		}
 		this.battle.scene.animSummon(pokemon, slot, true);
-		// not sure if we want a different callback
-		if (this.battle.dragCallback) this.battle.dragCallback(this.battle, this);
 	}
 	switchOut(pokemon: Pokemon, slot = pokemon.slot) {
 		if (pokemon.lastMove !== 'batonpass' && pokemon.lastMove !== 'zbatonpass') {
@@ -913,7 +931,6 @@ class Side {
 		pokemon.hp = 0;
 
 		this.battle.scene.animFaint(pokemon);
-		if (this.battle.faintCallback) this.battle.faintCallback(this.battle, this);
 	}
 	destroy() {
 		this.clearPokemon();
@@ -922,40 +939,7 @@ class Side {
 	}
 }
 
-enum Playback {
-	/**
-	 * Battle is at the end of the queue. `|start` is not in the queue.
-	 * Battle is waiting for `.add()` or `.setQueue()` to add `|start` to
-	 * the queue. Adding other queue entries will happen immediately,
-	 * bringing the state back to Uninitialized.
-	 */
-	Uninitialized = 0,
-	/**
-	 * Battle is at `|start` and hasn't been started yet.
-	 * Battle is paused, waiting for `.play()`.
-	 */
-	Ready = 1,
-	/**
-	 * `.play()` has been called. Battle should be animating
-	 * normally.
-	 */
-	Playing = 2,
-	/**
-	 * `.pause()` has been called. Battle is waiting for `.play()`.
-	 */
-	Paused = 3,
-	/**
-	 * Battle is at the end of the queue. Battle is waiting for
-	 * `.add()` for further battle progress.
-	 */
-	Finished = 4,
-	/**
-	 * Battle is fast forwarding through the queue, with animations off.
-	 */
-	Seeking = 5,
-}
-
-interface PokemonDetails {
+export interface PokemonDetails {
 	details: string;
 	name: string;
 	speciesForme: string;
@@ -965,14 +949,14 @@ interface PokemonDetails {
 	ident: string;
 	searchid: string;
 }
-interface PokemonHealth {
+export interface PokemonHealth {
 	hp: number;
 	maxhp: number;
 	hpcolor: HPColor | '';
 	status: StatusName | 'tox' | '' | '???';
 	fainted?: boolean;
 }
-interface ServerPokemon extends PokemonDetails, PokemonHealth {
+export interface ServerPokemon extends PokemonDetails, PokemonHealth {
 	ident: string;
 	details: string;
 	condition: string;
@@ -995,45 +979,54 @@ interface ServerPokemon extends PokemonDetails, PokemonHealth {
 	item: string;
 	/** currently an ID, will revise to name */
 	pokeball: string;
+	/** false if the pokemon cannot gigantamax, otherwise a string containing the full name of its G-max move */
+	gigantamax: string | false;
 }
 
-class Battle {
-	scene: BattleScene | BattleSceneStub;
+export class Battle {
+	scene: BattleSceneStub;
 
 	sidesSwitched = false;
 
-	// activity queue
-	activityQueue = [] as string[];
+	stepQueue: string[];
 	/** See battle.instantAdd */
-	preemptActivityQueue = [] as string[];
+	preemptStepQueue: string[] = [];
 	waitForAnimations: true | false | 'simult' = true;
-	activityStep = 0;
-	fastForward = 0;
-	fastForwardWillScroll = false;
+	/** the index of `stepQueue` currently being animated */
+	currentStep = 0;
+	/** null = not seeking, 0 = seek start, Infinity = seek end, otherwise: seek turn number */
+	seeking: number | null = null;
 
-	resultWaiting = false;
 	activeMoveIsSpread: string | null = null;
 
-	// callback
-	faintCallback: ((battle: Battle, side: Side) => void) | null = null;
-	switchCallback: ((battle: Battle, side: Side) => void) | null = null;
-	dragCallback: ((battle: Battle, side: Side) => void) | null = null;
-	turnCallback: ((battle: Battle) => void) | null = null;
-	startCallback: ((battle: Battle) => void) | null = null;
-	stagnateCallback: ((battle: Battle) => void) | null = null;
-	endCallback: ((battle: Battle) => void) | null = null;
-	customCallback: ((battle: Battle, cmd: string, args: string[], kwArgs: KWArgs) => void) | null = null;
-	errorCallback: ((battle: Battle) => void) | null = null;
+	subscription: ((state:
+		'playing' | 'paused' | 'turn' | 'atqueueend' | 'callback' | 'ended' | 'error'
+	) => void) | null;
 
 	mute = false;
 	messageFadeTime = 300;
 	messageShownTime = 1;
+	/** for tracking when to accelerate animations in long battles full of double switches */
 	turnsSinceMoved = 0;
 
-	turn = 0;
 	/**
-	 * Has playback gotten to Team Preview or `|start` yet?
-	 * (Affects whether BGM is playing)
+	 * * `-1` = non-battle RoomGames, or hasn't hit Team Preview or `|start`
+	 * * `0` = after Team Preview or `|start` but before `|turn|1`
+	 */
+	turn = -1;
+	/**
+	 * Are we at the end of the queue and waiting for more input?
+	 *
+	 * In addition to at the end of a battle, this is also true if you're
+	 * playing/watching a battle live, and waiting for a player to make a move.
+	 */
+	atQueueEnd = false;
+	/**
+	 * Has the battle ever been played or fast-forwarded?
+	 *
+	 * This is not exactly `turn > 0` because if you start playing a replay,
+	 * then pause before turn 1, `turn` will still be 0, but playback should
+	 * be considered started (for the purposes of displaying "Play" vs "Resume")
 	 */
 	started = false;
 	/**
@@ -1041,25 +1034,36 @@ class Battle {
 	 * (Affects whether BGM is playing)
 	 */
 	ended = false;
+	isReplay = false;
 	usesUpkeep = false;
 	weather = '' as ID;
 	pseudoWeather = [] as WeatherState[];
 	weatherTimeLeft = 0;
 	weatherMinTimeLeft = 0;
+	/**
+	 * The side from which perspective we're viewing. Should be identical to
+	 * `nearSide` except in multi battles, where `nearSide` is always the first
+	 * near side, and `mySide` is the active player.
+	 */
 	mySide: Side = null!;
-	yourSide: Side = null!;
+	nearSide: Side = null!;
+	farSide: Side = null!;
 	p1: Side = null!;
 	p2: Side = null!;
+	p3?: Side = null!;
+	p4?: Side = null!;
+	pokemonControlled = 0;
+	sides: Side[] = null!;
 	myPokemon: ServerPokemon[] | null = null;
-	sides: [Side, Side] = [null!, null!];
+	myAllyPokemon: ServerPokemon[] | null = null;
 	lastMove = '';
 
-	gen = 7;
+	gen = 8;
 	dex: ModdedDex = Dex;
 	teamPreviewCount = 0;
 	speciesClause = false;
 	tier = '';
-	gameType: 'singles' | 'doubles' | 'triples' = 'singles';
+	gameType: 'singles' | 'doubles' | 'triples' | 'multi' | 'freeforall' = 'singles';
 	rated: string | boolean = false;
 	isBlitz = false;
 	endLastTurnPending = false;
@@ -1074,34 +1078,60 @@ class Battle {
 
 	// options
 	id = '';
+	/** used to forward some information to the room in the old client */
 	roomid = '';
 	hardcoreMode = false;
 	ignoreNicks = !!Dex.prefs('ignorenicks');
 	ignoreOpponent = !!Dex.prefs('ignoreopp');
 	ignoreSpects = !!Dex.prefs('ignorespects');
-	debug = false;
+	debug: boolean;
 	joinButtons = false;
 
 	/**
 	 * The actual pause state. Will only be true if playback is actually
 	 * paused, not just waiting for the opponent to make a move.
 	 */
-	paused = true;
-	playbackState = Playback.Uninitialized;
+	paused: boolean;
 
-	// external
-	resumeButton: JQuery.EventHandler<HTMLElement, null> | null = null;
+	constructor(options: {
+		$frame?: JQuery<HTMLElement>,
+		$logFrame?: JQuery<HTMLElement>,
+		id?: ID,
+		log?: string[],
+		paused?: boolean,
+		isReplay?: boolean,
+		debug?: boolean,
+		subscription?: Battle['subscription'],
+	} = {}) {
+		this.id = options.id || '';
 
-	constructor($frame: JQuery<HTMLElement>, $logFrame: JQuery<HTMLElement>, id = '') {
-		this.id = id;
-
-		if (!$frame && !$logFrame) {
+		if (options.$frame && options.$logFrame) {
+			this.scene = new BattleScene(this, options.$frame, options.$logFrame);
+		} else if (!options.$frame && !options.$logFrame) {
 			this.scene = new BattleSceneStub();
 		} else {
-			this.scene = new BattleScene(this, $frame, $logFrame);
+			throw new Error(`You must specify $frame and $logFrame simultaneously`);
 		}
 
-		this.init();
+		this.paused = !!options.paused;
+		this.started = !this.paused;
+		this.debug = !!options.debug;
+		this.stepQueue = options.log || [];
+		this.subscription = options.subscription || null;
+
+		this.p1 = new Side(this, 0);
+		this.p2 = new Side(this, 1);
+		this.sides = [this.p1, this.p2];
+		this.p2.foe = this.p1;
+		this.p1.foe = this.p2;
+		this.nearSide = this.mySide = this.p1;
+		this.farSide = this.p2;
+
+		this.resetStep();
+	}
+
+	subscribe(listener: Battle['subscription']) {
+		this.subscription = listener;
 	}
 
 	removePseudoWeather(weather: string) {
@@ -1125,22 +1155,42 @@ class Battle {
 		}
 		return false;
 	}
-	init() {
-		this.mySide = new Side(this, 0);
-		this.yourSide = new Side(this, 1);
-		this.mySide.foe = this.yourSide;
-		this.yourSide.foe = this.mySide;
-		this.sides = [this.mySide, this.yourSide];
-		this.p1 = this.mySide;
-		this.p2 = this.yourSide;
-		this.gen = 7;
-		this.reset();
+	ngasActive() {
+		for (const side of this.sides) {
+			for (const active of side.active) {
+				if (active && !active.fainted && active.ability === 'Neutralizing Gas' && !active.volatiles['gastroacid']) {
+					return true;
+				}
+			}
+		}
+		return false;
 	}
-	reset(dontResetSound?: boolean) {
+	abilityActive(abilities: string[]) {
+		if (this.ngasActive()) {
+			abilities = abilities.filter(a => this.dex.abilities.get(a).isPermanent);
+			if (!abilities.length) return false;
+		}
+		for (const side of this.sides) {
+			for (const active of side.active) {
+				if (active && !active.fainted && abilities.includes(active.ability) && !active.volatiles['gastroacid']) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+	reset() {
+		this.paused = true;
+		this.scene.pause();
+		this.resetStep();
+		this.subscription?.('paused');
+	}
+	resetStep() {
 		// battle state
-		this.turn = 0;
-		this.started = false;
+		this.turn = -1;
+		this.started = !this.paused;
 		this.ended = false;
+		this.atQueueEnd = false;
 		this.weather = '' as ID;
 		this.weatherTimeLeft = 0;
 		this.weatherMinTimeLeft = 0;
@@ -1151,22 +1201,16 @@ class Battle {
 			if (side) side.reset();
 		}
 		this.myPokemon = null;
+		this.myAllyPokemon = null;
 
 		// DOM state
 		this.scene.reset();
 
 		// activity queue state
 		this.activeMoveIsSpread = null;
-		this.activityStep = 0;
-		this.fastForwardOff();
-		this.resultWaiting = false;
-		this.paused = true;
-		if (this.playbackState !== Playback.Seeking) {
-			this.playbackState = Playback.Uninitialized;
-			if (!dontResetSound) this.scene.resetBgm();
-		}
+		this.currentStep = 0;
 		this.resetTurnsSinceMoved();
-		this.nextActivity();
+		this.nextStep();
 	}
 	destroy() {
 		this.scene.destroy();
@@ -1176,9 +1220,12 @@ class Battle {
 			this.sides[i] = null!;
 		}
 		this.mySide = null!;
-		this.yourSide = null!;
+		this.nearSide = null!;
+		this.farSide = null!;
 		this.p1 = null!;
 		this.p2 = null!;
+		this.p3 = null!;
+		this.p4 = null!;
 	}
 
 	log(args: Args, kwArgs?: KWArgs, preempt?: boolean) {
@@ -1186,41 +1233,35 @@ class Battle {
 	}
 
 	resetToCurrentTurn() {
-		if (this.ended) {
-			this.reset(true);
-			this.fastForwardTo(-1);
-		} else {
-			let turn = this.turn;
-			let paused = this.paused;
-			this.reset(true);
-			this.paused = paused;
-			if (turn) this.fastForwardTo(turn);
-			if (!paused) {
-				this.play();
-			} else {
-				this.pause();
-			}
-		}
+		this.seekTurn(this.ended ? Infinity : this.turn, true);
 	}
 	switchSides() {
-		this.setSidesSwitched(!this.sidesSwitched);
-		this.resetToCurrentTurn();
+		this.setPerspective(this.sidesSwitched ? 'p1' : 'p2');
 	}
-	setSidesSwitched(sidesSwitched: boolean) {
-		this.sidesSwitched = sidesSwitched;
-		if (this.sidesSwitched) {
-			this.mySide = this.p2;
-			this.yourSide = this.p1;
-		} else {
-			this.mySide = this.p1;
-			this.yourSide = this.p2;
-		}
-		this.sides[0] = this.mySide;
-		this.sides[1] = this.yourSide;
-		this.sides[0].n = 0;
-		this.sides[1].n = 1;
+	setPerspective(sideid: SideID) {
+		if (this.mySide.sideid === sideid) return;
+		if (sideid.length !== 2 || !sideid.startsWith('p')) return;
+		const side = this[sideid];
+		if (!side) return;
+		this.mySide = side;
 
-		// nothing else should need updating - don't call this function after sending out pokemon
+		if ((side.n % 2) === this.p1.n) {
+			this.sidesSwitched = false;
+			this.nearSide = this.p1;
+			this.farSide = this.p2;
+		} else {
+			this.sidesSwitched = true;
+			this.nearSide = this.p2;
+			this.farSide = this.p1;
+		}
+		this.nearSide.isFar = false;
+		this.farSide.isFar = true;
+		if (this.sides.length > 2) {
+			this.sides[this.nearSide.n + 2].isFar = false;
+			this.sides[this.farSide.n + 2].isFar = true;
+		}
+
+		this.resetToCurrentTurn();
 	}
 
 	//
@@ -1229,15 +1270,16 @@ class Battle {
 	start() {
 		this.log(['start']);
 		this.resetTurnsSinceMoved();
-		if (this.startCallback) this.startCallback(this);
 	}
 	winner(winner?: string) {
 		this.log(['win', winner || '']);
 		this.ended = true;
+		this.subscription?.('ended');
 	}
 	prematureEnd() {
 		this.log(['message', 'This replay ends here.']);
 		this.ended = true;
+		this.subscription?.('ended');
 	}
 	endLastTurn() {
 		if (this.endLastTurnPending) {
@@ -1250,28 +1292,25 @@ class Battle {
 		this.scene.updateSidebars();
 		this.scene.updateWeather(true);
 	}
-	setTurn(turnNum: string | number) {
-		turnNum = parseInt(turnNum as string, 10);
+	setTurn(turnNum: number) {
 		if (turnNum === this.turn + 1) {
 			this.endLastTurnPending = true;
 		}
 		if (this.turn && !this.usesUpkeep) this.updateTurnCounters(); // for compatibility with old replays
 		this.turn = turnNum;
+		this.started = true;
 
-		if (!this.fastForward) this.turnsSinceMoved++;
+		if (this.seeking === null) this.turnsSinceMoved++;
 
 		this.scene.incrementTurn();
 
-		if (this.fastForward) {
-			if (this.turnCallback) this.turnCallback(this);
-			if (this.fastForward > -1 && turnNum >= this.fastForward) {
-				this.fastForwardOff();
-				if (this.endCallback) this.endCallback(this);
+		if (this.seeking !== null) {
+			if (turnNum >= this.seeking) {
+				this.stopSeeking();
 			}
-			return;
+		} else {
+			this.subscription?.('turn');
 		}
-
-		if (this.turnCallback) this.turnCallback(this);
 	}
 	resetTurnsSinceMoved() {
 		this.turnsSinceMoved = 0;
@@ -1287,7 +1326,7 @@ class Battle {
 				this.weatherTimeLeft--;
 				if (this.weatherMinTimeLeft !== 0) this.weatherMinTimeLeft--;
 			}
-			if (!this.fastForward) {
+			if (this.seeking === null) {
 				this.scene.upkeepWeather();
 			}
 			return;
@@ -1311,6 +1350,35 @@ class Battle {
 		this.weather = weather;
 		this.scene.updateWeather();
 	}
+	swapSideConditions() {
+		const sideConditions = [
+			'mist', 'lightscreen', 'reflect', 'spikes', 'safeguard', 'tailwind', 'toxicspikes', 'stealthrock', 'waterpledge', 'firepledge', 'grasspledge', 'stickyweb', 'auroraveil', 'gmaxsteelsurge', 'gmaxcannonade', 'gmaxvinelash', 'gmaxwildfire',
+		];
+		if (this.gameType === 'freeforall') {
+			// TODO: Add FFA support
+			return;
+		} else {
+			let side1 = this.sides[0];
+			let side2 = this.sides[1];
+			for (const id of sideConditions) {
+				if (side1.sideConditions[id] && side2.sideConditions[id]) {
+					[side1.sideConditions[id], side2.sideConditions[id]] = [
+						side2.sideConditions[id], side1.sideConditions[id],
+					];
+					this.scene.addSideCondition(side1.n, id as ID);
+					this.scene.addSideCondition(side2.n, id as ID);
+				} else if (side1.sideConditions[id] && !side2.sideConditions[id]) {
+					side2.sideConditions[id] = side1.sideConditions[id];
+					this.scene.addSideCondition(side2.n, id as ID);
+					side1.removeSideCondition(id);
+				} else if (side2.sideConditions[id] && !side1.sideConditions[id]) {
+					side1.sideConditions[id] = side2.sideConditions[id];
+					this.scene.addSideCondition(side1.n, id as ID);
+					side2.removeSideCondition(id);
+				}
+			}
+		}
+	}
 	updateTurnCounters() {
 		for (const pWeather of this.pseudoWeather) {
 			if (pWeather[1]) pWeather[1]--;
@@ -1322,11 +1390,11 @@ class Battle {
 				if (cond[2]) cond[2]--;
 				if (cond[3]) cond[3]--;
 			}
-			for (const poke of side.active) {
-				if (poke) {
-					if (poke.status === 'tox') poke.statusData.toxicTurns++;
-					poke.clearTurnstatuses();
-				}
+		}
+		for (const poke of [...this.nearSide.active, ...this.farSide.active]) {
+			if (poke) {
+				if (poke.status === 'tox') poke.statusData.toxicTurns++;
+				poke.clearTurnstatuses();
 			}
 		}
 		this.scene.updateWeather();
@@ -1345,11 +1413,11 @@ class Battle {
 			let moveName = move.name;
 			if (move.isZ) {
 				pokemon.item = move.isZ;
-				let item = Dex.getItem(move.isZ);
+				let item = Dex.items.get(move.isZ);
 				if (item.zMoveFrom) moveName = item.zMoveFrom;
 			} else if (move.name.slice(0, 2) === 'Z-') {
 				moveName = moveName.slice(2);
-				move = Dex.getMove(moveName);
+				move = Dex.moves.get(moveName);
 				if (window.BattleItems) {
 					for (let item in BattleItems) {
 						if (BattleItems[item].zMoveType === move.type) pokemon.item = item;
@@ -1357,14 +1425,33 @@ class Battle {
 				}
 			}
 			let pp = 1;
-			if (move.target === "all") {
-				for (const active of pokemon.side.foe.active) {
-					if (active && toID(active.ability) === 'pressure') {
+			// Sticky Web is never affected by pressure
+			if (this.abilityActive(['Pressure']) && move.id !== 'stickyweb') {
+				const foeTargets = [];
+
+				if (
+					!target && this.gameType === 'singles' &&
+					!['self', 'allies', 'allySide', 'adjacentAlly', 'adjacentAllyOrSelf', 'allyTeam'].includes(move.target)
+				) {
+					// Hardcode for moves without a target in singles
+					foeTargets.push(pokemon.side.foe.active[0]);
+				} else if (['all', 'allAdjacent', 'allAdjacentFoes', 'foeSide'].includes(move.target)) {
+					// We loop through all sides here for FFA
+					for (const side of this.sides) {
+						if (side === pokemon.side || side === pokemon.side.ally) continue;
+						for (const active of side.active) {
+							foeTargets.push(active);
+						}
+					}
+				} else if (target && target.side !== pokemon.side) {
+					foeTargets.push(target);
+				}
+
+				for (const foe of foeTargets) {
+					if (foe && !foe.fainted && foe.effectiveAbility() === 'Pressure') {
 						pp += 1;
 					}
 				}
-			} else if (target && target.side !== pokemon.side && toID(target.ability) === 'pressure') {
-				pp += 1;
 			}
 			pokemon.rememberMove(moveName, pp);
 		}
@@ -1376,7 +1463,7 @@ class Battle {
 	}
 	animateMove(pokemon: Pokemon, move: Move, target: Pokemon | null, kwArgs: KWArgs) {
 		this.activeMoveIsSpread = kwArgs.spread;
-		if (this.fastForward || kwArgs.still) return;
+		if (this.seeking !== null || kwArgs.still) return;
 
 		if (!target) target = pokemon.side.foe.active[0];
 		if (!target) target = pokemon.side.foe.missedPokemon;
@@ -1392,7 +1479,7 @@ class Battle {
 			return;
 		}
 
-		let usedMove = kwArgs.anim ? Dex.getMove(kwArgs.anim) : move;
+		let usedMove = kwArgs.anim ? Dex.moves.get(kwArgs.anim) : move;
 		if (!kwArgs.spread) {
 			this.scene.runMoveAnim(usedMove.id, [pokemon, target]);
 			return;
@@ -1501,7 +1588,7 @@ class Battle {
 			}
 			if (args[0] === 'detailschange' && nextArgs[0] === '-mega') {
 				if (this.scene.closeMessagebar()) {
-					this.activityStep--;
+					this.currentStep--;
 					return;
 				}
 				kwArgs.simult = '.';
@@ -1510,6 +1597,7 @@ class Battle {
 		if (kwArgs.then) this.waitForAnimations = false;
 		if (kwArgs.simult) this.waitForAnimations = 'simult';
 
+		const CONSUMED = ['eaten', 'popped', 'consumed', 'held up'];
 		switch (args[0]) {
 		case '-damage': {
 			let poke = this.getPokemon(args[1])!;
@@ -1523,7 +1611,7 @@ class Battle {
 				this.activateAbility(ofpoke, effect);
 				if (effect.effectType === 'Item') {
 					const itemPoke = ofpoke || poke;
-					if (itemPoke.prevItem !== effect.name) {
+					if (itemPoke.prevItem !== effect.name && !CONSUMED.includes(itemPoke.prevItemEffect)) {
 						itemPoke.item = effect.name;
 					}
 				}
@@ -1577,8 +1665,10 @@ class Battle {
 			if (kwArgs.from) {
 				let effect = Dex.getEffect(kwArgs.from);
 				this.activateAbility(poke, effect);
-				if (effect.effectType === 'Item') {
-					poke.item = effect.name;
+				if (effect.effectType === 'Item' && !CONSUMED.includes(poke.prevItemEffect)) {
+					if (poke.prevItem !== effect.name) {
+						poke.item = effect.name;
+					}
 				}
 				switch (effect.id) {
 				case 'lunardance':
@@ -1933,7 +2023,6 @@ class Battle {
 			let effect = Dex.getEffect(kwArgs.from);
 			let ofpoke = this.getPokemon(kwArgs.of) || poke;
 			poke.status = args[2] as StatusName;
-			poke.removeVolatile('yawn' as ID);
 			this.activateAbility(ofpoke || poke, effect);
 			if (effect.effectType === 'Item') {
 				ofpoke.item = effect.name;
@@ -2033,7 +2122,7 @@ class Battle {
 		}
 		case '-item': {
 			let poke = this.getPokemon(args[1])!;
-			let item = Dex.getItem(args[2]);
+			let item = Dex.items.get(args[2]);
 			let effect = Dex.getEffect(kwArgs.from);
 			let ofpoke = this.getPokemon(kwArgs.of);
 			poke.item = item.name;
@@ -2101,7 +2190,7 @@ class Battle {
 		}
 		case '-enditem': {
 			let poke = this.getPokemon(args[1])!;
-			let item = Dex.getItem(args[2]);
+			let item = Dex.items.get(args[2]);
 			let effect = Dex.getEffect(kwArgs.from);
 			poke.item = '';
 			poke.itemEffect = '';
@@ -2163,7 +2252,7 @@ class Battle {
 		}
 		case '-ability': {
 			let poke = this.getPokemon(args[1])!;
-			let ability = Dex.getAbility(args[2]);
+			let ability = Dex.abilities.get(args[2]);
 			let effect = Dex.getEffect(kwArgs.from);
 			let ofpoke = this.getPokemon(kwArgs.of);
 			poke.rememberAbility(ability.name, effect.id && !kwArgs.fail);
@@ -2203,6 +2292,7 @@ class Battle {
 			} else {
 				this.activateAbility(poke, ability.name);
 			}
+			this.scene.updateWeather();
 			this.log(args, kwArgs);
 			break;
 		}
@@ -2210,7 +2300,7 @@ class Battle {
 			// deprecated; use |-start| for Gastro Acid
 			// and the third arg of |-ability| for Entrainment et al
 			let poke = this.getPokemon(args[1])!;
-			let ability = Dex.getAbility(args[2]);
+			let ability = Dex.abilities.get(args[2]);
 			poke.ability = '(suppressed)';
 
 			if (ability.id) {
@@ -2234,7 +2324,7 @@ class Battle {
 				}
 				newSpeciesForme = args[2].substr(0, commaIndex);
 			}
-			let species = this.dex.getSpecies(newSpeciesForme);
+			let species = this.dex.species.get(newSpeciesForme);
 
 			poke.speciesForme = newSpeciesForme;
 			poke.ability = poke.baseAbility = (species.abilities ? species.abilities['0'] : '');
@@ -2259,7 +2349,8 @@ class Battle {
 			poke.boosts = {...tpoke.boosts};
 			poke.copyTypesFrom(tpoke);
 			poke.ability = tpoke.ability;
-			const speciesForme = (tpoke.volatiles.formechange ? tpoke.volatiles.formechange[1] : tpoke.speciesForme);
+			const targetForme = tpoke.volatiles.formechange;
+			const speciesForme = (targetForme && !targetForme[1].endsWith('-Gmax')) ? targetForme[1] : tpoke.speciesForme;
 			const pokemon = tpoke;
 			const shiny = tpoke.shiny;
 			const gender = tpoke.gender;
@@ -2275,9 +2366,9 @@ class Battle {
 		}
 		case '-formechange': {
 			let poke = this.getPokemon(args[1])!;
-			let species = Dex.getSpecies(args[2]);
+			let species = Dex.species.get(args[2]);
 			let fromeffect = Dex.getEffect(kwArgs.from);
-			let isCustomAnim = false;
+			let isCustomAnim = species.name.startsWith('Wishiwashi');
 			poke.removeVolatile('typeadd' as ID);
 			poke.removeVolatile('typechange' as ID);
 			if (this.gen >= 7) poke.removeVolatile('autotomize' as ID);
@@ -2292,7 +2383,7 @@ class Battle {
 		}
 		case '-mega': {
 			let poke = this.getPokemon(args[1])!;
-			let item = Dex.getItem(args[3]);
+			let item = Dex.items.get(args[3]);
 			if (args[3]) {
 				poke.item = item.name;
 			}
@@ -2449,6 +2540,10 @@ class Battle {
 				}
 				break;
 
+			// Gen 1-2
+			case 'mist':
+				this.scene.resultAnim(poke, 'Mist', 'good');
+				break;
 			// Gen 1
 			case 'lightscreen':
 				this.scene.resultAnim(poke, 'Light Screen', 'good');
@@ -2672,7 +2767,7 @@ class Battle {
 			case 'eeriespell':
 			case 'gmaxdepletion':
 			case 'spite':
-				let move = Dex.getMove(kwArgs.move).name;
+				let move = Dex.moves.get(kwArgs.move).name;
 				let pp = Number(kwArgs.number);
 				if (isNaN(pp)) pp = 4;
 				poke.rememberMove(move, pp);
@@ -2716,7 +2811,7 @@ class Battle {
 				break;
 			case 'mummy':
 				if (!kwArgs.ability) break; // if Mummy activated but failed, no ability will have been sent
-				let ability = Dex.getAbility(kwArgs.ability);
+				let ability = Dex.abilities.get(kwArgs.ability);
 				this.activateAbility(target, ability.name);
 				this.activateAbility(poke, "Mummy");
 				this.scene.wait(700);
@@ -2730,6 +2825,9 @@ class Battle {
 				break;
 			case 'focusband':
 				poke.item = 'Focus Band';
+				break;
+			case 'quickclaw':
+				poke.item = 'Quick Claw';
 				break;
 			default:
 				if (kwArgs.broken) { // for custom moves that break protection
@@ -2751,6 +2849,13 @@ class Battle {
 			case 'lightscreen':
 			case 'safeguard':
 			case 'mist':
+			case 'gmaxwildfire':
+			case 'gmaxvolcalith':
+			case 'gmaxvinelash':
+			case 'gmaxcannonade':
+			case 'grasspledge':
+			case 'firepledge':
+			case 'waterpledge':
 				this.scene.updateWeather();
 				break;
 			}
@@ -2763,6 +2868,12 @@ class Battle {
 			// let from = Dex.getEffect(kwArgs.from);
 			// let ofpoke = this.getPokemon(kwArgs.of);
 			side.removeSideCondition(effect.name);
+			this.log(args, kwArgs);
+			break;
+		}
+		case '-swapsideconditions': {
+			this.swapSideConditions();
+			this.scene.updateWeather();
 			this.log(args, kwArgs);
 			break;
 		}
@@ -2797,11 +2908,10 @@ class Battle {
 
 			switch (effect.id) {
 			case 'gravity':
-				if (!this.fastForward) {
-					for (const side of this.sides) {
-						for (const active of side.active) {
-							if (active) this.scene.runOtherAnim('gravity' as ID, [active]);
-						}
+				if (this.seeking !== null) break;
+				for (const side of this.sides) {
+					for (const active of side.active) {
+						if (active) this.scene.runOtherAnim('gravity' as ID, [active]);
 					}
 				}
 				break;
@@ -2828,7 +2938,7 @@ class Battle {
 		}
 		case '-anim': {
 			let poke = this.getPokemon(args[1])!;
-			let move = Dex.getMove(args[2]);
+			let move = Dex.moves.get(args[2]);
 			if (this.checkActive(poke)) return;
 			let poke2 = this.getPokemon(args[3]);
 			this.scene.beforeMove(poke);
@@ -2836,7 +2946,7 @@ class Battle {
 			this.scene.afterMove(poke);
 			break;
 		}
-		case '-hint': case '-message': {
+		case '-hint': case '-message': case '-candynamax': {
 			this.log(args, kwArgs);
 			break;
 		}
@@ -2872,7 +2982,7 @@ class Battle {
 		}
 		if (foe) siden = (siden ? 0 : 1);
 
-		let data = Dex.getSpecies(name);
+		let data = Dex.species.get(name);
 		return data.spriteData[siden];
 	}
 	*/
@@ -2952,23 +3062,15 @@ class Battle {
 
 		let siden = -1;
 		let slot = -1; // if there is an explicit slot for this pokemon
-		let slotChart: {[k: string]: number} = {a: 0, b: 1, c: 2, d: 3, e: 4, f: 5};
-		if (name.substr(0, 4) === 'p2: ' || name === 'p2') {
-			siden = this.p2.n;
-			name = name.substr(4);
-		} else if (name.substr(0, 4) === 'p1: ' || name === 'p1') {
-			siden = this.p1.n;
-			name = name.substr(4);
-		} else if (name.substr(0, 2) === 'p2' && name.substr(3, 2) === ': ') {
-			slot = slotChart[name.substr(2, 1)];
-			siden = this.p2.n;
-			name = name.substr(5);
-			pokemonid = 'p2: ' + name;
-		} else if (name.substr(0, 2) === 'p1' && name.substr(3, 2) === ': ') {
-			slot = slotChart[name.substr(2, 1)];
-			siden = this.p1.n;
-			name = name.substr(5);
-			pokemonid = 'p1: ' + name;
+		if (/^p[1-9]($|: )/.test(name)) {
+			siden = parseInt(name.charAt(1), 10) - 1;
+			name = name.slice(4);
+		} else if (/^p[1-9][a-f]: /.test(name)) {
+			const slotChart: {[k: string]: number} = {a: 0, b: 1, c: 2, d: 3, e: 4, f: 5};
+			siden = parseInt(name.charAt(1), 10) - 1;
+			slot = slotChart[name.charAt(2)];
+			name = name.slice(5);
+			pokemonid = `p${siden + 1}: ${name}`;
 		}
 		return {name, siden, slot, pokemonid};
 	}
@@ -3047,32 +3149,26 @@ class Battle {
 		return null;
 	}
 	getSide(sidename: string): Side {
-		if (sidename === 'p1' || sidename.substr(0, 3) === 'p1:') return this.p1;
-		if (sidename === 'p2' || sidename.substr(0, 3) === 'p2:') return this.p2;
-		if (this.mySide.id === sidename) return this.mySide;
-		if (this.yourSide.id === sidename) return this.yourSide;
-		if (this.mySide.name === sidename) return this.mySide;
-		if (this.yourSide.name === sidename) return this.yourSide;
+		if (sidename === 'p1' || sidename.startsWith('p1:')) return this.p1;
+		if (sidename === 'p2' || sidename.startsWith('p2:')) return this.p2;
+		if ((sidename === 'p3' || sidename.startsWith('p3:')) && this.p3) return this.p3;
+		if ((sidename === 'p4' || sidename.startsWith('p4:')) && this.p4) return this.p4;
+		if (this.nearSide.id === sidename) return this.nearSide;
+		if (this.farSide.id === sidename) return this.farSide;
+		if (this.nearSide.name === sidename) return this.nearSide;
+		if (this.farSide.name === sidename) return this.farSide;
 		return {
 			name: sidename,
 			id: sidename.replace(/ /g, ''),
 		} as any;
 	}
 
-	add(command: string, fastForward?: boolean) {
-		if (command) this.activityQueue.push(command);
+	add(command?: string) {
+		if (command) this.stepQueue.push(command);
 
-		if (this.playbackState === Playback.Uninitialized) {
-			this.nextActivity();
-		} else if (this.playbackState === Playback.Finished) {
-			this.playbackState = this.paused ? Playback.Paused : Playback.Playing;
-			if (this.paused) return;
-			this.scene.updateBgm();
-			if (fastForward) {
-				this.fastForwardTo(-1);
-			} else {
-				this.nextActivity();
-			}
+		if (this.atQueueEnd && this.currentStep < this.stepQueue.length) {
+			this.atQueueEnd = false;
+			this.nextStep();
 		}
 	}
 	/**
@@ -3085,15 +3181,15 @@ class Battle {
 	 */
 	instantAdd(command: string) {
 		this.run(command, true);
-		this.preemptActivityQueue.push(command);
+		this.preemptStepQueue.push(command);
 		this.add(command);
 	}
 	runMajor(args: Args, kwArgs: KWArgs, preempt?: boolean) {
 		switch (args[0]) {
 		case 'start': {
-			this.scene.teamPreviewEnd();
-			this.mySide.active[0] = null;
-			this.yourSide.active[0] = null;
+			this.nearSide.active[0] = null;
+			this.farSide.active[0] = null;
+			this.scene.resetSides();
 			this.start();
 			break;
 		}
@@ -3103,7 +3199,7 @@ class Battle {
 			break;
 		}
 		case 'turn': {
-			this.setTurn(args[1]);
+			this.setTurn(parseInt(args[1], 10));
 			this.log(args);
 			break;
 		}
@@ -3116,27 +3212,53 @@ class Battle {
 				this.messageFadeTime = 40;
 				this.isBlitz = true;
 			}
+			if (this.tier.includes(`Let's Go`)) {
+				this.dex = Dex.mod('gen7letsgo' as ID);
+			}
 			this.log(args);
 			break;
 		}
 		case 'gametype': {
 			this.gameType = args[1] as any;
 			switch (args[1]) {
-			default:
-				this.mySide.active = [null];
-				this.yourSide.active = [null];
+			case 'multi':
+			case 'freeforall':
+				this.pokemonControlled = 1;
+				if (!this.p3) this.p3 = new Side(this, 2);
+				if (!this.p4) this.p4 = new Side(this, 3);
+				this.p3.foe = this.p2;
+				this.p4.foe = this.p1;
+
+				if (args[1] === 'multi') {
+					this.p4.ally = this.p2;
+					this.p3.ally = this.p1;
+					this.p1.ally = this.p3;
+					this.p2.ally = this.p4;
+				}
+
+				this.p3.isFar = this.p1.isFar;
+				this.p4.isFar = this.p2.isFar;
+				this.sides = [this.p1, this.p2, this.p3, this.p4];
+				// intentionally sync p1/p3 and p2/p4's active arrays
+				this.p1.active = this.p3.active = [null, null];
+				this.p2.active = this.p4.active = [null, null];
 				break;
 			case 'doubles':
-				this.mySide.active = [null, null];
-				this.yourSide.active = [null, null];
+				this.nearSide.active = [null, null];
+				this.farSide.active = [null, null];
 				break;
 			case 'triples':
 			case 'rotation':
-				this.mySide.active = [null, null, null];
-				this.yourSide.active = [null, null, null];
+				this.nearSide.active = [null, null, null];
+				this.farSide.active = [null, null, null];
+				break;
+			default:
+				for (const side of this.sides) side.active = [null];
 				break;
 			}
+			if (!this.pokemonControlled) this.pokemonControlled = this.nearSide.active.length;
 			this.scene.updateGen();
+			this.scene.resetSides();
 			break;
 		}
 		case 'rule': {
@@ -3241,9 +3363,9 @@ class Battle {
 			side.setName(args[2]);
 			if (args[3]) side.setAvatar(args[3]);
 			if (args[4]) side.rating = args[4];
-			this.scene.updateSidebar(side);
 			if (this.joinButtons) this.scene.hideJoinButtons();
 			this.log(args);
+			this.scene.updateSidebar(side);
 			break;
 		}
 		case 'teamsize': {
@@ -3267,8 +3389,22 @@ class Battle {
 		}
 		case 'poke': {
 			let pokemon = this.rememberTeamPreviewPokemon(args[1], args[2])!;
-			if (args[3] === 'item') {
+			if (args[3] === 'mail') {
+				pokemon.item = '(mail)';
+			} else if (args[3] === 'item') {
 				pokemon.item = '(exists)';
+			}
+			break;
+		}
+		case 'updatepoke': {
+			const {siden} = this.parsePokemonId(args[1]);
+			const side = this.sides[siden];
+			for (let i = 0; i < side.pokemon.length; i++) {
+				const pokemon = side.pokemon[i];
+				if (pokemon.details !== args[2] && pokemon.checkDetails(args[2])) {
+					side.addPokemon('', '', args[2], i);
+					break;
+				}
 			}
 			break;
 		}
@@ -3293,6 +3429,7 @@ class Battle {
 			} else {
 				poke.side.dragIn(poke);
 			}
+			this.scene.updateWeather();
 			this.log(args, kwArgs);
 			break;
 		}
@@ -3322,7 +3459,7 @@ class Battle {
 			this.endLastTurn();
 			this.resetTurnsSinceMoved();
 			let poke = this.getPokemon(args[1])!;
-			let move = Dex.getMove(args[2]);
+			let move = Dex.moves.get(args[2]);
 			if (this.checkActive(poke)) return;
 			let poke2 = this.getPokemon(args[3]);
 			this.scene.beforeMove(poke);
@@ -3337,7 +3474,7 @@ class Battle {
 			this.resetTurnsSinceMoved();
 			let poke = this.getPokemon(args[1])!;
 			let effect = Dex.getEffect(args[2]);
-			let move = Dex.getMove(args[3]);
+			let move = Dex.moves.get(args[3]);
 			this.cantUseMove(poke, effect, move, kwArgs);
 			this.log(args, kwArgs);
 			break;
@@ -3350,11 +3487,10 @@ class Battle {
 			break;
 		}
 		case 'callback': {
-			if (this.customCallback) this.customCallback(this, args[1], args.slice(1), kwArgs);
+			this.subscription?.('callback');
 			break;
 		}
 		case 'fieldhtml': {
-			this.playbackState = Playback.Seeking; // force seeking to prevent controls etc
 			this.scene.setFrameHTML(BattleLog.sanitizeHTML(args[1]));
 			break;
 		}
@@ -3369,8 +3505,8 @@ class Battle {
 	}
 
 	run(str: string, preempt?: boolean) {
-		if (!preempt && this.preemptActivityQueue.length && str === this.preemptActivityQueue[0]) {
-			this.preemptActivityQueue.shift();
+		if (!preempt && this.preemptStepQueue.length && str === this.preemptStepQueue[0]) {
+			this.preemptStepQueue.shift();
 			this.scene.preemptCatchup();
 			return;
 		}
@@ -3378,7 +3514,7 @@ class Battle {
 		const {args, kwArgs} = BattleTextParser.parseBattleLine(str);
 
 		if (this.scene.maybeCloseMessagebar(args, kwArgs)) {
-			this.activityStep--;
+			this.currentStep--;
 			this.activeMoveIsSpread = null;
 			return;
 		}
@@ -3386,7 +3522,7 @@ class Battle {
 		// parse the next line if it's a minor: runMinor needs it parsed to determine when to merge minors
 		let nextArgs: Args = [''];
 		let nextKwargs: KWArgs = {};
-		const nextLine = this.activityQueue[this.activityStep + 1] || '';
+		const nextLine = this.stepQueue[this.currentStep + 1] || '';
 		if (nextLine.slice(0, 2) === '|-') {
 			({args: nextArgs, kwArgs: nextKwargs} = BattleTextParser.parseBattleLine(nextLine));
 		}
@@ -3404,7 +3540,7 @@ class Battle {
 				} else {
 					this.runMajor(args, kwArgs, preempt);
 				}
-			} catch (err) {
+			} catch (err: any) {
 				this.log(['majorerror', 'Error parsing: ' + str + ' (' + err + ')']);
 				if (err.stack) {
 					let stack = ('' + err.stack).split('\n');
@@ -3415,16 +3551,15 @@ class Battle {
 						this.log(['error', line]);
 					}
 				}
-				if (this.errorCallback) this.errorCallback(this);
+				this.subscription?.('error');
 			}
 		}
 
 		if (nextLine.startsWith('|start') || args[0] === 'teampreview') {
-			this.started = true;
-			if (this.playbackState === Playback.Uninitialized) {
-				this.playbackState = Playback.Ready;
+			if (this.turn === -1) {
+				this.turn = 0;
+				this.scene.updateBgm();
 			}
-			this.scene.updateBgm();
 		}
 	}
 	checkActive(poke: Pokemon) {
@@ -3437,97 +3572,118 @@ class Battle {
 
 	pause() {
 		this.paused = true;
-		this.playbackState = Playback.Paused;
 		this.scene.pause();
+		this.subscription?.('paused');
 	}
+	/**
+	 * Properties relevant to battle playback, for replay UI implementers:
+	 * - `ended`: has the game ended in a win/loss?
+	 * - `atQueueEnd`: is animation caught up to the end of the battle queue, waiting for more input?
+	 * - `seeking`: are we trying to skip to a specific turn
+	 * - `turn`: what turn are we currently on? `-1` if we haven't started yet, `0` at team preview
+	 * - `paused`: are we playing at all?
+	 */
 	play() {
 		this.paused = false;
-		this.playbackState = Playback.Playing;
+		this.started = true;
 		this.scene.resume();
-		this.nextActivity();
+		this.nextStep();
+		this.subscription?.('playing');
 	}
 	skipTurn() {
-		this.fastForwardTo(this.turn + 1);
+		this.seekTurn(this.turn + 1);
 	}
-	fastForwardTo(time: string | number) {
-		if (this.fastForward) return;
-		time = Math.floor(Number(time));
-		if (isNaN(time)) return;
-		if (this.ended && time >= this.turn + 1) return;
+	seekTurn(turn: number, forceReset?: boolean) {
+		if (isNaN(turn)) return;
+		turn = Math.max(Math.floor(turn), 0);
 
-		if (time <= this.turn && time !== -1) {
-			let paused = this.paused;
-			this.reset(true);
-			if (paused) this.pause();
-			else this.paused = false;
-			this.fastForwardWillScroll = true;
-		}
-		if (!time) {
-			this.fastForwardOff();
-			this.nextActivity();
+		if (this.seeking !== null && this.seeking > turn && !forceReset) {
+			this.seeking = turn;
 			return;
 		}
-		this.scene.animationOff();
-		this.playbackState = Playback.Seeking;
-		this.fastForward = time;
-		this.nextActivity();
+
+		if (turn === 0) {
+			this.seeking = null;
+			this.resetStep();
+			this.scene.animationOn();
+			if (this.paused) this.subscription?.('paused');
+			return;
+		}
+
+		this.seeking = turn;
+
+		if (turn <= this.turn || forceReset) {
+			this.scene.animationOff();
+			this.resetStep();
+		} else if (this.atQueueEnd) {
+			this.scene.animationOn();
+			this.seeking = null;
+		} else {
+			this.scene.animationOff();
+			this.nextStep();
+		}
 	}
-	fastForwardOff() {
-		this.fastForward = 0;
+	stopSeeking() {
+		this.seeking = null;
 		this.scene.animationOn();
-		this.playbackState = this.paused ? Playback.Paused : Playback.Playing;
+		this.subscription?.(this.paused ? 'paused' : 'playing');
 	}
-	nextActivity() {
-		if (this.playbackState === Playback.Ready || this.playbackState === Playback.Paused) {
-			return;
-		}
+	shouldStep() {
+		if (this.atQueueEnd) return false;
+		if (this.seeking !== null) return true;
+		return !(this.paused && this.turn >= 0);
+	}
+	nextStep() {
+		if (!this.shouldStep()) return;
 
 		this.scene.startAnimations();
 		let animations = undefined;
-		while (!animations) {
+
+		do {
 			this.waitForAnimations = true;
-			if (this.activityStep >= this.activityQueue.length) {
-				this.fastForwardOff();
-				this.playbackState = Playback.Finished;
+			if (this.currentStep >= this.stepQueue.length) {
+				this.atQueueEnd = true;
+				if (!this.ended && this.isReplay) this.prematureEnd();
+				this.stopSeeking();
 				if (this.ended) {
 					this.scene.updateBgm();
 				}
-				if (this.endCallback) this.endCallback(this);
+				this.subscription?.('atqueueend');
 				return;
 			}
-			// @ts-ignore property modified in method
-			if (this.playbackState === Playback.Ready || this.playbackState === Playback.Paused) {
-				return;
-			}
-			this.run(this.activityQueue[this.activityStep]);
-			this.activityStep++;
+
+			this.run(this.stepQueue[this.currentStep]);
+			this.currentStep++;
 			if (this.waitForAnimations === true) {
 				animations = this.scene.finishAnimations();
 			} else if (this.waitForAnimations === 'simult') {
 				this.scene.timeOffset = 0;
 			}
-		}
+		} while (!animations && this.shouldStep());
 
-		// @ts-ignore property modified in method
-		if (this.playbackState === Playback.Ready || this.playbackState === Playback.Paused) {
+		if (this.paused && this.turn >= 0 && this.seeking === null) {
+			// initial Play button, team preview
+			this.scene.pause();
 			return;
 		}
+
+		if (!animations) return;
 
 		const interruptionCount = this.scene.interruptionCount;
 		animations.done(() => {
 			if (interruptionCount === this.scene.interruptionCount) {
-				this.nextActivity();
+				this.nextStep();
 			}
 		});
 	}
 
 	setQueue(queue: string[]) {
-		this.activityQueue = queue;
-		this.reset();
+		this.stepQueue = queue;
+		this.resetStep();
 	}
 
 	setMute(mute: boolean) {
-		BattleSound.setMute(mute);
+		this.scene.setMute(mute);
 	}
 }
 

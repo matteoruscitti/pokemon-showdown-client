@@ -13,7 +13,17 @@
  * @license MIT
  */
 
-class BattleLog {
+import type {BattleScene} from './battle-animations';
+
+// Caja
+declare const html4: any;
+declare const html: any;
+
+// defined in battle-log-misc
+declare function MD5(input: string): string;
+declare function formatText(input: string, isTrusted?: boolean): string;
+
+export class BattleLog {
 	elem: HTMLDivElement;
 	innerElem: HTMLDivElement;
 	scene: BattleScene | null = null;
@@ -210,6 +220,14 @@ class BattleLog {
 			divHTML = '<div class="chat"><small style="color:#999">[DEBUG] ' + BattleLog.escapeHTML(args[1]) + '.</small></div>';
 			break;
 
+		case 'notify':
+			const title = args[1];
+			const body = args[2];
+			const roomid = this.scene?.battle.roomid;
+			if (!roomid) break;
+			app.rooms[roomid].notifyOnce(title, body, 'highlight');
+			break;
+
 		case 'seed': case 'choice': case ':': case 'timer': case 't:':
 		case 'J': case 'L': case 'N': case 'spectator': case 'spectatorleave':
 		case 'initdone':
@@ -350,7 +368,7 @@ class BattleLog {
 	addSpacer() {
 		this.addDiv('spacer battle-history', '<br />');
 	}
-	changeUhtml(id: string, html: string, forceAdd?: boolean) {
+	changeUhtml(id: string, htmlSrc: string, forceAdd?: boolean) {
 		id = toID(id);
 		const classContains = ' uhtml-' + id + ' ';
 		let elements = [] as HTMLDivElement[];
@@ -366,9 +384,9 @@ class BattleLog {
 				}
 			}
 		}
-		if (html && elements.length && !forceAdd) {
+		if (htmlSrc && elements.length && !forceAdd) {
 			for (const element of elements) {
-				element.innerHTML = BattleLog.sanitizeHTML(html);
+				element.innerHTML = BattleLog.sanitizeHTML(htmlSrc);
 			}
 			this.updateScroll();
 			return;
@@ -376,11 +394,11 @@ class BattleLog {
 		for (const element of elements) {
 			element.parentElement!.removeChild(element);
 		}
-		if (!html) return;
+		if (!htmlSrc) return;
 		if (forceAdd) {
-			this.addDiv('notice uhtml-' + id, BattleLog.sanitizeHTML(html));
+			this.addDiv('notice uhtml-' + id, BattleLog.sanitizeHTML(htmlSrc));
 		} else {
-			this.prependDiv('notice uhtml-' + id, BattleLog.sanitizeHTML(html));
+			this.prependDiv('notice uhtml-' + id, BattleLog.sanitizeHTML(htmlSrc));
 		}
 	}
 	hideChatFrom(userid: ID, showRevealButton = true, lineCount = 0) {
@@ -457,6 +475,9 @@ class BattleLog {
 		}
 		if (window.BattleFormats && BattleFormats[formatid]) {
 			return this.escapeHTML(BattleFormats[formatid].name);
+		}
+		if (window.NonBattleGames && NonBattleGames[formatid]) {
+			return this.escapeHTML(NonBattleGames[formatid]);
 		}
 		return this.escapeHTML(formatid);
 	}
@@ -623,8 +644,8 @@ class BattleLog {
 		case 'uhtml':
 		case 'uhtmlchange':
 			let parts = target.split(',');
-			let html = parts.slice(1).join(',').trim();
-			this.changeUhtml(parts[0], html, cmd === 'uhtml');
+			let htmlSrc = parts.slice(1).join(',').trim();
+			this.changeUhtml(parts[0], htmlSrc, cmd === 'uhtml');
 			return ['', ''];
 		case 'raw':
 			return ['chat', BattleLog.sanitizeHTML(target)];
@@ -703,6 +724,9 @@ class BattleLog {
 			blink: 0,
 			psicon: html4.eflags['OPTIONAL_ENDTAG'] | html4.eflags['EMPTY'],
 			username: 0,
+			spotify: 0,
+			youtube: 0,
+			twitch: 0,
 		});
 
 		// By default, Caja will ban any attributes it doesn't recognize.
@@ -725,6 +749,10 @@ class BattleLog {
 			'psicon::type': 0,
 			'psicon::category': 0,
 			'username::name': 0,
+			'form::data-submitsend': 0,
+			'button::data-send': 0,
+			'form::data-delimiter': 0,
+			'button::data-delimiter': 0,
 			'*::aria-label': 0,
 			'*::aria-hidden': 0,
 		});
@@ -796,12 +824,58 @@ class BattleLog {
 						setAttrib('src', 'https:' + src);
 					}
 				}
+			} else if (tagName === 'twitch') {
+				// <iframe src="https://player.twitch.tv/?channel=ninja&parent=www.example.com" allowfullscreen="true" height="378" width="620"></iframe>
+				const src = getAttrib('src') || "";
+				const channelId = /(https?:\/\/)?twitch.tv\/([A-Za-z0-9]+)/i.exec(src)?.[2];
+				const height = parseInt(getAttrib('height') || "", 10) || 400;
+				const width = parseInt(getAttrib('width') || "", 10) || 340;
+				return {
+					tagName: 'iframe',
+					attribs: [
+						'src', `https://player.twitch.tv/?channel=${channelId}&parent=${location.hostname}&autoplay=false`,
+						'allowfullscreen', 'true', 'height', `${height}`, 'width', `${width}`,
+					],
+				};
 			} else if (tagName === 'username') {
 				// <username> is a custom element that handles namecolors
 				tagName = 'strong';
 				const color = this.usernameColor(toID(getAttrib('name')));
 				const style = getAttrib('style');
 				setAttrib('style', `${style};color:${color}`);
+			} else if (tagName === 'spotify') {
+				// <iframe src="https://open.spotify.com/embed/track/6aSYnCIwcLpnDXngGKAEzZ" width="300" height="380" frameborder="0" allowtransparency="true" allow="encrypted-media"></iframe>
+				const src = getAttrib('src') || '';
+				const songId = /(?:\?v=|\/track\/)([A-Za-z0-9]+)/.exec(src)?.[1];
+
+				return {
+					tagName: 'iframe',
+					attribs: ['src', `https://open.spotify.com/embed/track/${songId}`, 'width', '300', 'height', '380', 'frameborder', '0', 'allowtransparency', 'true', 'allow', 'encrypted-media'],
+				};
+			} else if (tagName === 'youtube') {
+				// <iframe width="320" height="180" src="https://www.youtube.com/embed/dQw4w9WgXcQ" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+
+				const src = getAttrib('src') || '';
+				// Google's ToS requires a minimum of 200x200
+				let width = '320';
+				let height = '200';
+				if (window.innerWidth >= 400) {
+					width = '400';
+					height = '225';
+				}
+				const videoId = /(?:\?v=|\/embed\/)([A-Za-z0-9_\-]+)/.exec(src)?.[1];
+				if (!videoId) return {tagName: 'img', attribs: ['alt', `invalid src for <youtube>`]};
+
+				const time = /(?:\?|&)(?:t|start)=([0-9]+)/.exec(src)?.[1];
+
+				return {
+					tagName: 'iframe',
+					attribs: [
+						'width', width, 'height', height,
+						'src', `https://www.youtube.com/embed/${videoId}${time ? `?start=${time}` : ''}`,
+						'frameborder', '0', 'allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture', 'allowfullscreen', 'allowfullscreen',
+					],
+				};
 			} else if (tagName === 'psicon') {
 				// <psicon> is a custom element which supports a set of mutually incompatible attributes:
 				// <psicon pokemon> and <psicon item>
@@ -841,7 +915,7 @@ class BattleLog {
 			if (dataUri && tagName === 'img') {
 				setAttrib('src', dataUri);
 			}
-			if (tagName === 'a' || tagName === 'form') {
+			if (tagName === 'a' || (tagName === 'form' && !getAttrib('data-submitsend'))) {
 				if (targetReplace) {
 					setAttrib('data-target', 'replace');
 					deleteAttrib('target');
@@ -952,7 +1026,7 @@ class BattleLog {
 			// replay panel
 			replayid = room.fragment;
 		}
-		battle.fastForwardTo(-1);
+		battle.seekTurn(Infinity);
 		let buf = '<!DOCTYPE html>\n';
 		buf += '<meta charset="utf-8" />\n';
 		buf += '<!-- version 1 -->\n';
@@ -964,7 +1038,7 @@ class BattleLog {
 		buf += '<input type="hidden" name="replayid" value="' + replayid + '" />\n';
 		buf += '<div class="battle"></div><div class="battle-log"></div><div class="replay-controls"></div><div class="replay-controls-2"></div>\n';
 		buf += `<h1 style="font-weight:normal;text-align:center"><strong>${BattleLog.escapeHTML(battle.tier)}</strong><br /><a href="http://${Config.routes.users}/${toID(battle.p1.name)}" class="subtle" target="_blank">${BattleLog.escapeHTML(battle.p1.name)}</a> vs. <a href="http://${Config.routes.users}/${toID(battle.p2.name)}" class="subtle" target="_blank">${BattleLog.escapeHTML(battle.p2.name)}</a></h1>\n`;
-		buf += '<script type="text/plain" class="battle-log-data">' + battle.activityQueue.join('\n').replace(/\//g, '\\/') + '</script>\n'; // lgtm [js/incomplete-sanitization]
+		buf += '<script type="text/plain" class="battle-log-data">' + battle.stepQueue.join('\n').replace(/\//g, '\\/') + '</script>\n'; // lgtm [js/incomplete-sanitization]
 		buf += '</div>\n';
 		buf += '<div class="battle-log battle-log-inline"><div class="inner">' + battle.scene.log.elem.innerHTML + '</div></div>\n';
 		buf += '</div>\n';

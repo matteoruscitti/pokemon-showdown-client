@@ -34,7 +34,7 @@ $formats = array(
 	'gen8battlestadiumsingles' => 'Battle Stadium Singles',
 	'gen8randomdoublesbattle' => 'Random Doubles Battle',
 	'gen8doublesou' => 'Doubles OU',
-	'gen8vgc2020' => 'VGC 2020',
+	'gen8vgc2021' => 'VGC 2021',
 	'gen8balancedhackmons' => 'Balanced Hackmons',
 	'gen8mixandmega' => 'Mix and Mega',
 	'gen8almostanyability' => 'Almost Any Ability',
@@ -52,7 +52,8 @@ if (isset($_REQUEST['json'])) {
 	header('Access-Control-Allow-Origin: *');
 	if (!$formatid) die('null');
 	$ladder = new NTBBLadder($formatid);
-	$toplist = $ladder->getTop();
+	$prefix = $_REQUEST['prefix'] ?? null;
+	$toplist = $ladder->getTop($prefix);
 	foreach ($toplist as &$row) {
 		unset($row['formatid']);
 		unset($row['entryid']);
@@ -106,28 +107,29 @@ if (!$formatid) {
 			<li><a data-target="push" class="button" href="/ladder/gen8uu">UnderUsed</a></li>
 			<li><a data-target="push" class="button" href="/ladder/gen8ru">RarelyUsed</a></li>
 			<li><a data-target="push" class="button" href="/ladder/gen8nu">NeverUsed</a></li>
-			<li><a data-target="push" class="button nav-last" href="/ladder/gen8pu">PU</a></li>
+			<li><a data-target="push" class="button" href="/ladder/gen8pu">PU</a></li>
+			<li><a data-target="push" class="button" href="/ladder/gen8lc">Little Cup</a></li>
+			<li><a data-target="push" class="button nav-last" href="/ladder/gen8monotype">Monotype</a></li>
 		</ul>
 		<ul class="laddernav">
-			<li><a data-target="push" class="button nav-first" href="/ladder/gen8lc">Little Cup</a></li>
-			<li><a data-target="push" class="button" href="/ladder/gen8monotype">Monotype</a></li>
-			<!--li><a data-target="push" class="button" href="/ladder/gen8anythinggoes">Anything Goes</a></li-->
-			<!--li><a data-target="push" class="button" href="/ladder/gen8zu">ZU</a></li-->
-			<li><a data-target="push" class="button" href="/ladder/gen81v1">1v1</a></li>
-			<li><a data-target="push" class="button nav-last" href="/ladder/gen8battlestadiumsingles">Battle Stadium Singles</a></li>
+			<li><a data-target="push" class="button nav-first" href="/ladder/gen81v1">1v1</a></li>
+			<li><a data-target="push" class="button" href="/ladder/gen8anythinggoes">Anything Goes</a></li-->
+			<li><a data-target="push" class="button" href="/ladder/gen8zu">ZU</a></li-->
+			<li><a data-target="push" class="button" href="/ladder/gen8battlestadiumsingles">Battle Stadium Singles</a></li>
+			<li><a data-target="push" class="button nav-last" href="/ladder/gen8cap">CAP</a></li>
 		</ul>
 		<ul class="laddernav">
 			<li><a data-target="push" class="button nav-first" href="/ladder/gen8randomdoublesbattle">Random Doubles Battle</a></li>
 			<li><a data-target="push" class="button" href="/ladder/gen8doublesou">Doubles OU</a></li>
-			<li><a data-target="push" class="button nav-last" href="/ladder/gen8vgc2020">VGC 2020</a></li>
+			<li><a data-target="push" class="button nav-last" href="/ladder/gen8vgc2021">VGC 2021</a></li>
 		</ul>
 		<ul class="laddernav">
 			<li><a data-target="push" class="button nav-first" href="/ladder/gen8balancedhackmons">Balanced Hackmons</a></li>
 			<li><a data-target="push" class="button" href="/ladder/gen8mixandmega">Mix and Mega</a></li>
 			<li><a data-target="push" class="button" href="/ladder/gen8almostanyability">Almost Any Ability</a></li>
 			<li><a data-target="push" class="button" href="/ladder/gen8stabmons">STABmons</a></li>
-			<li><a data-target="push" class="button" href="/ladder/gen8nfe">NFE</a></li>
-			<li><a data-target="push" class="button nav-last" href="/ladder/gen8cap">CAP</a></li>
+			<li><a data-target="push" class="button" href="/ladder/gen8stabmons">Camomons</a></li>
+			<li><a data-target="push" class="button nav-last" href="/ladder/gen8nfe">NFE</a></li>
 		</ul>
 		<h1>
 			Find user
@@ -144,19 +146,22 @@ if (!$formatid) {
 		<a href="/ladder/" class="pfx-backbutton" data-target="back"><i class="fa fa-chevron-left"></i> Ladders</a>
 		<h1><?php echo $format; ?> top 500</h1>
 <?php
-	if ($curuser['userid'] === 'zarel' || $curuser['userid'] === 'theimmortal' || substr($formatid, -11) === 'suspecttest' || substr($formatid, -7) === 'current') {
+
+	// we previously allowed all TLs to reset suspect ladders:
+	//   substr($formatid, -11) === 'suspecttest' || substr($formatid, -7) === 'current'
+	// but that functionality got lost somewhere along the way
+	if ($users->isSysop()) {
 		$success = false;
-		if ($curuser['userid'] === 'zarel' || $curuser['userid'] === 'chaos' || $curuser['userid'] === 'theimmortal' || $curuser['userid'] === 'marty') {
-			if (@$_POST['act'] === 'resetladder' && $users->csrfCheck()) {
-				if ($_POST['confirm'] === "Permanently reset this ladder.") {
-					$ladder->clearAllRatings();
-					$success = true;
-					echo '<p>Ladder reset.</p>';
-				} else {
-					echo '<p>Your confirmation was not spelled/punctuated/capitalized correctly.</p>';
-				}
+		if (@$_POST['act'] === 'resetladder' && $users->csrfCheck()) {
+			if ($_POST['confirm'] === "Permanently reset this ladder.") {
+				$ladder->clearAllRatings();
+				$success = true;
+				echo '<p>Ladder reset.</p>';
+			} else {
+				echo '<p>Your confirmation was not spelled/punctuated/capitalized correctly.</p>';
 			}
-			if (!$success) {
+		}
+		if (!$success) {
 ?>
 		<form method="post">
 			<input type="hidden" name="act" value="resetladder"> <?php $users->csrfData() ?>
@@ -175,7 +180,6 @@ if (!$formatid) {
 			</div>
 		</form>
 <?php
-			}
 		}
 	}
 ?>

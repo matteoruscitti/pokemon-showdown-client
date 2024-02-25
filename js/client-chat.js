@@ -51,7 +51,7 @@
 
 		focus: function (e, focusTextbox) {
 			var target = e && e.target;
-			if (target && target.tagName === 'TEXTAREA') {
+			if (target && ['TEXTAREA', 'INPUT', 'SELECT'].includes(target.tagName)) {
 				// this workaround works for iOS 12 but not iOS 13
 				/* if (window.isiOS) {
 					// iOS will not bring up a keyboard unless you manually blur and refocus
@@ -115,6 +115,9 @@
 		submit: function (e) {
 			e.preventDefault();
 			e.stopPropagation();
+			if (e.currentTarget.getAttribute('data-submitsend')) {
+				return app.submitSend(e);
+			}
 			var text = this.$chatbox.val();
 			if (!text) return;
 			if (!$.trim(text)) {
@@ -124,7 +127,11 @@
 			this.tabComplete.reset();
 			this.chatHistory.push(text);
 			text = this.parseCommand(text);
-			if (this.battle && this.battle.ignoreSpects && app.user.get('userid') !== this.battle.p1.id && app.user.get('userid') !== this.battle.p2.id) {
+			if (
+				this.battle && this.battle.ignoreSpects &&
+				app.user.get('userid') !== this.battle.p1.id && app.user.get('userid') !== this.battle.p2.id &&
+				!(text.startsWith('/') && !text.startsWith('/me'))
+			) {
 				this.add("You can't chat in this battle as you're currently ignoring spectators");
 			} else if (text.length > 80000) {
 				app.addPopupMessage("Your message is too long.");
@@ -442,7 +449,7 @@
 				}
 			}
 
-			switch (cmd.toLowerCase()) {
+			switch (toID(cmd)) {
 			case 'chal':
 			case 'chall':
 			case 'challenge':
@@ -598,9 +605,29 @@
 				} else {
 					app.ignore[toUserid(target)] = 1;
 					this.add("User '" + toName(target) + "' ignored. (Moderator messages will not be ignored.)");
+					app.saveIgnore();
 				}
 				return false;
 
+			case 'clearignore':
+				if (this.checkBroadcast(cmd, text)) return false;
+				if (!target) {
+					this.parseCommand('/help ignore');
+					return false;
+				}
+				if (toID(target) !== 'confirm') {
+					this.add("Are you sure you want to clear your ignore list?");
+					this.add('|html|If you\'re sure, use <code>/clearignore confirm</code>');
+					return false;
+				}
+				if (!Object.keys(app.ignore).length) {
+					this.add("You have no ignored users.");
+					return false;
+				}
+				app.ignore = {};
+				app.saveIgnore();
+				this.add("Your ignore list was cleared.");
+				return false;
 			case 'unignore':
 				if (this.checkBroadcast(cmd, text)) return false;
 				if (!target) {
@@ -612,6 +639,7 @@
 				} else {
 					delete app.ignore[toUserid(target)];
 					this.add("User '" + toName(target) + "' no longer ignored.");
+					app.saveIgnore();
 				}
 				return false;
 
@@ -792,37 +820,39 @@
 			case 'highlight':
 				if (this.checkBroadcast(cmd, text)) return false;
 				var highlights = Dex.prefs('highlights') || {};
-				if (target.indexOf(',') > -1) {
-					var targets = target.match(/([^,]+?({\d*,\d*})?)+/g);
+				if (target.includes(' ')) {
+					var targets = target.split(' ');
+					var subCmd = targets[0];
+					targets = targets.slice(1).join(' ').match(/([^,]+?({\d*,\d*})?)+/g);
 					// trim the targets to be safe
 					for (var i = 0, len = targets.length; i < len; i++) {
 						targets[i] = targets[i].replace(/\n/g, '').trim();
 					}
-					switch (targets[0]) {
+					switch (subCmd) {
 					case 'add': case 'roomadd':
-						var key = targets[0] === 'roomadd' ? (Config.server.id + '#' + this.id) : 'global';
+						var key = subCmd === 'roomadd' ? (Config.server.id + '#' + this.id) : 'global';
 						var highlightList = highlights[key] || [];
-						for (var i = 1, len = targets.length; i < len; i++) {
+						for (var i = 0, len = targets.length; i < len; i++) {
 							if (!targets[i]) continue;
 							if (/[\\^$*+?()|{}[\]]/.test(targets[i])) {
 								// Catch any errors thrown by newly added regular expressions so they don't break the entire highlight list
 								try {
 									new RegExp(targets[i]);
 								} catch (e) {
-									return this.add(e.message.substr(0, 28) === 'Invalid regular expression: ' ? e.message : 'Invalid regular expression: /' + targets[i] + '/: ' + e.message);
+									return this.add('|error|' + (e.message.substr(0, 28) === 'Invalid regular expression: ' ? e.message : 'Invalid regular expression: /' + targets[i] + '/: ' + e.message));
 								}
 							}
-							if (highlightList.indexOf(targets[i]) > -1) {
-								return this.add(targets[i] + ' is already on your highlights list.');
+							if (highlightList.includes(targets[i])) {
+								return this.add('|error|' + targets[i] + ' is already on your highlights list.');
 							}
 						}
-						highlights[key] = highlightList.concat(targets.slice(1));
+						highlights[key] = highlightList.concat(targets);
 						this.add("Now highlighting on " + (key === 'global' ? "(everywhere): " : "(in " + key + "): ") + highlights[key].join(', '));
 						// We update the regex
 						this.updateHighlightRegExp(highlights);
 						break;
 					case 'delete': case 'roomdelete':
-						var key = targets[0] === 'roomdelete' ? (Config.server.id + '#' + this.id) : 'global';
+						var key = subCmd === 'roomdelete' ? (Config.server.id + '#' + this.id) : 'global';
 						var highlightList = highlights[key] || [];
 						var newHls = [];
 						for (var i = 0, len = highlightList.length; i < len; i++) {
@@ -838,28 +868,35 @@
 					default:
 						if (this.checkBroadcast(cmd, text)) return false;
 						// Wrong command
-						this.add('Error: Invalid /highlight command.');
+						this.add('|error|Invalid /highlight command.');
 						this.parseCommand('/help highlight'); // show help
 						return false;
 					}
 					Storage.prefs('highlights', highlights);
 				} else {
 					if (this.checkBroadcast(cmd, text)) return false;
-					if (target === 'delete') {
-						Storage.prefs('highlights', false);
-						this.updateHighlightRegExp({});
-						this.add("All highlights cleared");
+					if (['clear', 'roomclear', 'clearall'].includes(target)) {
+						var key = (target === 'roomclear' ? (Config.server.id + '#' + this.id) : (target === 'clearall' ? '' : 'global'));
+						if (key) {
+							highlights[key] = [];
+							this.add("All highlights (" + (key === 'global' ? "everywhere" : "in " + key) + ") cleared.");
+							this.updateHighlightRegExp(highlightList);
+						} else {
+							Storage.prefs('highlights', false);
+							this.add("All highlights (in all rooms and globally) cleared.");
+							this.updateHighlightRegExp({});
+						}
 					} else if (['show', 'list', 'roomshow', 'roomlist'].includes(target)) {
 						// Shows a list of the current highlighting words
 						var key = target.startsWith('room') ? (Config.server.id + '#' + this.id) : 'global';
 						if (highlights[key] && highlights[key].length > 0) {
 							this.add("Current highlight list " + (key === 'global' ? "(everywhere): " : "(in " + key + "): ") + highlights[key].join(", "));
 						} else {
-							this.add('Your highlight list' + (key === 'global' ? '' : ' in ' + this.id) + ' is empty.');
+							this.add('Your highlight list' + (key === 'global' ? '' : ' in ' + key) + ' is empty.');
 						}
 					} else {
 						// Wrong command
-						this.add('Error: Invalid /highlight command.');
+						this.add('|error|Invalid /highlight command.');
 						this.parseCommand('/help highlight'); // show help
 						return false;
 					}
@@ -1032,22 +1069,13 @@
 				for (var roomid in app.rooms) {
 					var battle = app.rooms[roomid] && app.rooms[roomid].battle;
 					if (!battle) continue;
-					var turn = battle.turn;
-					var oldState = battle.playbackState;
-					if (oldState === 4) turn = -1;
-					battle.reset(true);
-					battle.fastForwardTo(turn);
-					if (oldState !== 3) {
-						battle.play();
-					} else {
-						battle.pause();
-					}
+					battle.resetToCurrentTurn();
 				}
 				return false;
 
 			// documentation of client commands
 			case 'help':
-				if (this.checkBroadcast(cmd, text)) return false;
+			case 'h':
 				switch (toID(target)) {
 				case 'chal':
 				case 'chall':
@@ -1055,7 +1083,9 @@
 					this.add('/challenge - Open a prompt to challenge a user to a battle.');
 					this.add('/challenge [user] - Challenge the user [user] to a battle.');
 					this.add('/challenge [user], [format] - Challenge the user [user] to a battle in the specified [format].');
-					this.add('/challenge [user], [format] @@@ [Added Rule], [!Removed Rule], [-Banned thing], [*Restricted thing], [+Unbanned/unrestricted thing] - Challenge the user [user] to a battle in the specified [format] with the custom rules added on.');
+					this.add('/challenge [user], [format] @@@ [rules] - Challenge the user [user] to a battle with custom rules.');
+					this.add('[rules] can be a comma-separated list of: [added rule], ![removed rule], -[banned thing], *[restricted thing], +[unbanned/unrestricted thing]');
+					this.add('/battlerules - Detailed information on what can go in [rules].');
 					return false;
 				case 'accept':
 					this.add('/accept - Accept a challenge if only one is pending.');
@@ -1077,6 +1107,7 @@
 					this.add('/ignore [user] - Ignore all messages from the user [user].');
 					this.add('/unignore [user] - Remove the user [user] from your ignore list.');
 					this.add('/ignorelist - List all the users that you currently ignore.');
+					this.add('/clearignore - Remove all users on your ignore list.');
 					this.add('Note that staff messages cannot be ignored.');
 					return false;
 				case 'nick':
@@ -1115,13 +1146,15 @@
 				case 'highlight':
 				case 'hl':
 					this.add('Set up highlights:');
-					this.add('/highlight add, [word] - Add the word [word] to the highlight list.');
-					this.add('/highlight roomadd, [word] - Add the word [word] to the highlight list of whichever room you used the command in.');
+					this.add('/highlight add [word 1], [word 2], [...] - Add the provided list of words to your highlight list.');
+					this.add('/highlight roomadd [word 1], [word 2], [...] - Add the provided list of words to the highlight list of whichever room you used the command in.');
 					this.add('/highlight list - List all words that currently highlight you.');
 					this.add('/highlight roomlist - List all words that currently highlight you in whichever room you used the command in.');
-					this.add('/highlight delete, [word] - Delete the word [word] from your entire highlight list.');
-					this.add('/highlight roomdelete, [word] - Delete the word [word] from the highlight list of whichever room you used the command in.');
-					this.add('/highlight delete - Clear the highlight list.');
+					this.add('/highlight delete [word 1], [word 2], [...] - Delete the provided list of words from your entire highlight list.');
+					this.add('/highlight roomdelete [word 1], [word 2], [...] - Delete the provided list of words from the highlight list of whichever room you used the command in.');
+					this.add('/highlight clear - Clear your global highlight list.');
+					this.add('/highlight roomclear - Clear the highlight list of whichever room you used the command in.');
+					this.add('/highlight clearall - Clear your entire highlight list (all rooms and globally).');
 					return false;
 				case 'rank':
 				case 'ranking':
@@ -1660,10 +1693,18 @@
 		addChat: function (name, message, pm, msgTime) {
 			var userid = toUserid(name);
 
-			var speakerHasAuth = " +\u2606".indexOf(name.charAt(0)) < 0;
+			var speakerHasAuth = !" +\u2606".includes(name.charAt(0));
 			var user = (this.users && this.users[app.user.get('userid')]) || {};
-			var readerHasAuth = !" +\u2606\u203D!".includes(user.group || ' ');
-			if (app.ignore[userid] && !speakerHasAuth && !readerHasAuth) return;
+			var readerHasAuth = !" +\u2606\u203D\u2716!".includes(user.group || ' ');
+			if (app.ignore[userid] && !speakerHasAuth && !readerHasAuth) {
+				if (!app.ignoreNotified) {
+					this.$chat.append(
+						'<div class="chat">A message from ' + BattleLog.escapeHTML(name) + ' was ignored. (to unignore use /unignore)</div>'
+					);
+					app.ignoreNotified = true;
+				}
+				return;
+			}
 
 			// Add this user to the list of people who have spoken recently.
 			this.markUserActive(userid);
@@ -1705,6 +1746,10 @@
 
 			var isHighlighted = userid !== app.user.get('userid') && this.getHighlight(message);
 			var parsedMessage = MainMenuRoom.parseChatMessage(message, name, ChatRoom.getTimestamp('chat', msgTime), isHighlighted, this.$chat, true);
+			if (typeof parsedMessage.challenge === 'string') {
+				this.$chat.append('<div class="chat message-error">The server sent a challenge but this isn\'t a PM window!</div>');
+				return;
+			}
 			if (typeof parsedMessage === 'object' && 'noNotify' in parsedMessage) {
 				mayNotify = mayNotify && !parsedMessage.noNotify;
 				parsedMessage = parsedMessage.message;
@@ -1887,20 +1932,20 @@
 		comparator: function (a, b) {
 			if (a === b) return 0;
 
-			var aUser = this.room.users[a];
-			var bUser = this.room.users[b];
+			var aUser = this.room.users[a] || {group: Config.defaultGroup, away: false};
+			var bUser = this.room.users[b] || {group: Config.defaultGroup, away: false};
 
 			var aRank = (
-				Config.groups[aUser ? aUser.group : Config.defaultGroup || ' '] ||
+				Config.groups[aUser.group || ' '] ||
 				{order: (Config.defaultOrder || 10006.5)}
 			).order;
 			var bRank = (
-				Config.groups[bUser ? bUser.group : Config.defaultGroup || ' '] ||
+				Config.groups[bUser.group || ' '] ||
 				{order: (Config.defaultOrder || 10006.5)}
 			).order;
 
 			if (aRank !== bRank) return aRank - bRank;
-			if (aUser.away !== bUser.away) return aUser.away - bUser.away;
+			if ((aUser.away ? 1 : 0) !== (bUser.away ? 1 : 0)) return (aUser.away ? 1 : 0) - (bUser.away ? 1 : 0);
 			return (a > b ? 1 : -1);
 		},
 		getNoNamedUsersOnline: function () {

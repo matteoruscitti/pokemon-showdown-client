@@ -10,10 +10,12 @@ type BattleDesc = {
 	minElo?: number | string,
 	p1?: string,
 	p2?: string,
+	p3?: string,
+	p4?: string,
 };
 
 class BattlesRoom extends PSRoom {
-	readonly classType = 'battles';
+	override readonly classType = 'battles';
 	/** null means still loading */
 	format = '';
 	battles: BattleDesc[] | null = null;
@@ -82,11 +84,11 @@ class BattlesPanel extends PSRoomPanel<BattlesRoom> {
 }
 
 class BattleRoom extends ChatRoom {
-	readonly classType = 'battle';
-	pmTarget!: null;
-	challengeMenuOpen!: false;
-	challengingFormat!: null;
-	challengedFormat!: null;
+	override readonly classType = 'battle';
+	declare pmTarget: null;
+	declare challengeMenuOpen: false;
+	declare challengingFormat: null;
+	declare challengedFormat: null;
 
 	battle: Battle = null!;
 	/** null if spectator, otherwise current player's info */
@@ -123,7 +125,7 @@ class BattleRoom extends ChatRoom {
 				this.receiveLine([`error`, `/ffto - Invalid turn number: ${target}`]);
 				return true;
 			}
-			this.battle.fastForwardTo(turnNum);
+			this.battle.seekTurn(turnNum);
 			this.update(null);
 			return true;
 		} case 'switchsides': {
@@ -257,18 +259,20 @@ class BattlePanel extends PSRoomPanel<BattleRoom> {
 	};
 	componentDidMount() {
 		const $elem = $(this.base!);
-		const battle = new Battle($elem.find('.battle'), $elem.find('.battle-log'));
+		const battle = new Battle({
+			$frame: $elem.find('.battle'),
+			$logFrame: $elem.find('.battle-log'),
+		});
 		this.props.room.battle = battle;
-		battle.endCallback = () => this.forceUpdate();
-		battle.play();
 		(battle.scene as BattleScene).tooltips.listen($elem.find('.battle-controls'));
 		super.componentDidMount();
+		battle.subscribe(() => this.forceUpdate());
 	}
 	receiveLine(args: Args) {
 		const room = this.props.room;
 		switch (args[0]) {
 		case 'initdone':
-			room.battle.fastForwardTo(-1);
+			room.battle.seekTurn(Infinity);
 			return;
 		case 'request':
 			this.receiveRequest(args[1] ? JSON.parse(args[1]) : null);
@@ -300,9 +304,7 @@ class BattlePanel extends PSRoomPanel<BattleRoom> {
 
 		if (request.side) {
 			room.battle.myPokemon = request.side.pokemon;
-			if (room.battle.sidesSwitched !== !!(request.side.id === 'p2')) {
-				room.battle.switchSides();
-			}
+			room.battle.setPerspective(request.side.id);
 			room.side = request.side;
 		}
 
@@ -316,7 +318,7 @@ class BattlePanel extends PSRoomPanel<BattleRoom> {
 		if (room.side) {
 			return this.renderPlayerControls();
 		}
-		const atEnd = room.battle.playbackState === Playback.Finished;
+		const atEnd = room.battle.atQueueEnd;
 		return <div class="controls">
 			<p>
 				{atEnd ?
@@ -347,7 +349,7 @@ class BattlePanel extends PSRoomPanel<BattleRoom> {
 				return <div class="message-error">Maxed with no max moves</div>;
 			}
 			return active.moves.map((moveData, i) => {
-				const move = dex.getMove(moveData.name);
+				const move = dex.moves.get(moveData.name);
 				const maxMoveData = active.maxMoves![i];
 				const gmaxTooltip = maxMoveData.id.startsWith('gmax') ? `|${maxMoveData.id}` : ``;
 				const tooltip = `maxmove|${moveData.name}|${pokemonIndex}${gmaxTooltip}`;
@@ -362,7 +364,7 @@ class BattlePanel extends PSRoomPanel<BattleRoom> {
 				return <div class="message-error">No Z moves</div>;
 			}
 			return active.moves.map((moveData, i) => {
-				const move = dex.getMove(moveData.name);
+				const move = dex.moves.get(moveData.name);
 				const zMoveData = active.zMoves![i];
 				if (!zMoveData) {
 					return <button disabled>&nbsp;</button>;
@@ -375,7 +377,7 @@ class BattlePanel extends PSRoomPanel<BattleRoom> {
 		}
 
 		return active.moves.map((moveData, i) => {
-			const move = dex.getMove(moveData.name);
+			const move = dex.moves.get(moveData.name);
 			const tooltip = `move|${moveData.name}|${pokemonIndex}`;
 			return <MoveButton cmd={`/move ${i + 1}`} type={move.type} tooltip={tooltip} moveData={moveData}>
 				{move.name}
@@ -388,10 +390,10 @@ class BattlePanel extends PSRoomPanel<BattleRoom> {
 		const moveChoice = choices.stringChoice(choices.current);
 
 		const userSlot = choices.index();
-		const userSlotCross = battle.yourSide.active.length - 1 - userSlot;
+		const userSlotCross = battle.farSide.active.length - 1 - userSlot;
 
 		return [
-			battle.yourSide.active.map((pokemon, i) => {
+			battle.farSide.active.map((pokemon, i) => {
 				let disabled = false;
 				if (moveTarget === 'adjacentAlly' || moveTarget === 'adjacentAllyOrSelf') {
 					disabled = true;
@@ -406,7 +408,7 @@ class BattlePanel extends PSRoomPanel<BattleRoom> {
 				/>;
 			}).reverse(),
 			<div style="clear: left"></div>,
-			battle.mySide.active.map((pokemon, i) => {
+			battle.nearSide.active.map((pokemon, i) => {
 				let disabled = false;
 				if (moveTarget === 'adjacentFoe') {
 					disabled = true;
@@ -491,14 +493,14 @@ class BattlePanel extends PSRoomPanel<BattleRoom> {
 				if (choice.max && active?.canDynamax) buf.push(active?.canGigantamax ? `Gigantamax and ` : `Dynamax and `);
 				buf.push(`use `, <strong>{choices.getChosenMove(choice, i).name}</strong>);
 				if (choice.targetLoc > 0) {
-					const target = battle.yourSide.active[choice.targetLoc - 1];
+					const target = battle.farSide.active[choice.targetLoc - 1];
 					if (!target) {
 						buf.push(` at slot ${choice.targetLoc}`);
 					} else {
 						buf.push(` at ${target.name}`);
 					}
 				} else if (choice.targetLoc < 0) {
-					const target = battle.mySide.active[-choice.targetLoc - 1];
+					const target = battle.nearSide.active[-choice.targetLoc - 1];
 					if (!target) {
 						buf.push(` at ally slot ${choice.targetLoc}`);
 					} else {

@@ -1,5 +1,5 @@
 
-class BattleBGM {
+export class BattleBGM {
 	/**
 	 * May be shared with other BGM objects: every battle has its own BattleBGM
 	 * object, but two battles with the same music will have the same HTMLAudioElement
@@ -100,7 +100,7 @@ class BattleBGM {
 	}
 }
 
-const BattleSound = new class {
+export const BattleSound = new class {
 	soundCache: {[url: string]: HTMLAudioElement | undefined} = {};
 
 	bgm: BattleBGM[] = [];
@@ -137,7 +137,10 @@ const BattleSound = new class {
 
 	/** loopstart and loopend are in milliseconds */
 	loadBgm(url: string, loopstart: number, loopend: number, replaceBGM?: BattleBGM | null) {
-		if (replaceBGM) this.deleteBgm(replaceBGM);
+		if (replaceBGM) {
+			replaceBGM.stop();
+			this.deleteBgm(replaceBGM);
+		}
 
 		const bgm = new BattleBGM(url, loopstart, loopend);
 		this.bgm.push(bgm);

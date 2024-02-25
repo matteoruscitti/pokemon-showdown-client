@@ -282,7 +282,7 @@ select {
 
 input[type=range] {
 	-webkit-appearance: none;
-	-moz-appearance: range;
+	-moz-appearance: revert;
 	cursor: pointer;
 	height: 18px;
 	background: transparent;
@@ -555,7 +555,6 @@ details.readmore[open] summary:hover:before {
 .infobox-limited {
 	max-height: 200px;
 	overflow: auto;
-	overflow-x: hidden;
 }
 .broadcast-red {
 	background-color: #AA5544;

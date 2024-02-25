@@ -81,7 +81,7 @@ class ChatRoom extends PSRoom {
 			this.update(null);
 			return false;
 		}}
-		return false;
+		return super.handleMessage(line);
 	}
 	openChallenge() {
 		if (!this.pmTarget) {
@@ -495,6 +495,11 @@ class ChatLog extends preact.Component<{
 			preact.render(null, this.base!, controlsElem);
 			this.updateScroll();
 			return;
+		}
+		if (!controlsElem) {
+			controlsElem = document.createElement('div');
+			controlsElem.className = 'controls';
+			this.base!.appendChild(controlsElem);
 		}
 		preact.render(<div class="controls">{jsx}</div>, this.base!, controlsElem);
 		this.updateScroll();

@@ -388,6 +388,9 @@ function toId() {
 		routes: {
 			'*path': 'dispatchFragment'
 		},
+		events: {
+			'submit form': 'submitSend'
+		},
 		focused: true,
 		initialize: function () {
 			window.app = this;
@@ -399,7 +402,7 @@ function toId() {
 			this.supports = {};
 
 			// down
-			// if (document.location.hostname === 'play.pokemonshowdown.com') this.down = 'dos';
+			// if (document.location.hostname === 'play.pokemonshowdown.com') this.down = true;
 
 			this.addRoom('');
 			this.topbar = new Topbar({el: $('#header')});
@@ -452,6 +455,7 @@ function toId() {
 					if (Object.keys(settings).length) app.user.set('settings', settings);
 					// HTML5 history throws exceptions when running on file://
 					Backbone.history.start({pushState: !Config.testclient});
+					app.ignore = app.loadIgnore();
 				});
 			}
 
@@ -709,8 +713,18 @@ function toId() {
 		connect: function () {
 			if (this.down) return;
 
-			if (Config.server.banned || (Config.bannedHosts && Config.bannedHosts.indexOf(Config.server.host) >= 0)) {
-				this.addPopupMessage("This server has been deleted for breaking US laws, impersonating PS global staff, or other major rulebreaking.");
+			if (Config.bannedHosts) {
+				for (var i = 0; i < Config.bannedHosts.length; i++) {
+					var host = Config.bannedHosts[i];
+					if (typeof host === 'string' ? Config.server.host === host : host.test(Config.server.host)) {
+						Config.server.banned = true;
+						break;
+					}
+				}
+			}
+
+			if (Config.server.banned) {
+				this.addPopupMessage("This server has either been deleted for breaking US law or PS global rules, or it is hosted on a platform that's often used to host rulebreaking servers.");
 				return;
 			}
 
@@ -718,8 +732,31 @@ function toId() {
 			var constructSocket = function () {
 				var protocol = (Config.server.port === 443 || Config.server.https) ? 'https' : 'http';
 				Config.server.host = $.trim(Config.server.host);
-				return new SockJS(protocol + '://' + Config.server.host + ':' +
-					Config.server.port + Config.sockjsprefix, [], {timeout: 5 * 60 * 1000});
+				try {
+					if (Config.server.host === 'localhost') {
+						// connecting to localhost from psim.us is now banned as of Chrome 94
+						// thanks Docker for having vulns
+						// https://wicg.github.io/cors-rfc1918
+						// anyway, this affects SockJS because it makes HTTP requests to localhost
+						// but it turns out that making direct WebSocket connections to localhost is
+						// still supported, so we'll just bypass SockJS and use WebSocket directly.
+						console.log("Bypassing SockJS for localhost");
+						console.log('ws' + protocol.slice('4') + '://' + Config.server.host + ':' + Config.server.port + Config.sockjsprefix + '/websocket');
+						return new WebSocket(
+							'ws' + protocol.slice('4') + '://' + Config.server.host + ':' + Config.server.port + Config.sockjsprefix + '/websocket'
+						);
+					}
+					return new SockJS(
+						protocol + '://' + Config.server.host + ':' + Config.server.port + Config.sockjsprefix,
+						[], {timeout: 5 * 60 * 1000}
+					);
+				} catch (err) {
+					// The most common case this happens is if an HTTPS connection fails,
+					// and we fall back to HTTP, which throws a SecurityError if the URL
+					// is HTTPS
+					self.trigger('init:connectionerror');
+					return null;
+				}
 			};
 			this.socket = constructSocket();
 
@@ -793,6 +830,7 @@ function toId() {
 			if (!Config.testclient && location.search && window.history) {
 				history.replaceState(null, null, location.pathname);
 			}
+			if (fragment && fragment.includes('.')) fragment = '';
 			this.fragment = fragment = toRoomid(fragment || '');
 			if (this.initialFragment === undefined) this.initialFragment = fragment;
 			this.tryJoinRoom(fragment);
@@ -802,7 +840,7 @@ function toId() {
 		 * Send to sim server
 		 */
 		send: function (data, room) {
-			if (room && room !== 'lobby' && room !== true) {
+			if (room && room !== true) {
 				data = room + '|' + data;
 			} else if (room !== true) {
 				data = '|' + data;
@@ -816,6 +854,41 @@ function toId() {
 				console.log('>> ' + data);
 			}
 			this.socket.send(data);
+		},
+		serializeForm: function (form, checkboxOnOff) {
+			// querySelector dates back to IE8 so we can use it
+			// fortunate, because form serialization is a HUGE MESS in older browsers
+			var elements = form.querySelectorAll('input[name], select[name], textarea[name], keygen[name]');
+			var out = [];
+			for (var i = 0; i < elements.length; i++) {
+				var element = elements[i];
+				if (element.type === 'checkbox' && !element.value && checkboxOnOff) {
+					out.push([element.name, element.checked ? 'on' : 'off']);
+				} else if (!['checkbox', 'radio'].includes(element.type) || element.checked) {
+					out.push([element.name, element.value]);
+				}
+			}
+			return out;
+		},
+		submitSend: function (e) {
+			// Most of the code relating to this is nightmarish because of some dumb choices
+			// made when writing the original Backbone code. At least in the Preact client, event
+			// handling is a lot more straightforward because it doesn't rely on Backbone's event
+			// dispatch system.
+			var target = e.currentTarget;
+			var dataSend = target.getAttribute('data-submitsend');
+			if (dataSend) {
+				var toSend = dataSend;
+				var entries = this.serializeForm(target, true);
+				for (var i = 0; i < entries.length; i++) {
+					toSend = toSend.replace('{' + entries[i][0] + '}', entries[i][1]);
+				}
+				toSend = toSend.replace(/\{[a-z]+\}/g, '');
+				this.send(toSend);
+				e.currentTarget.innerText = 'Submitted!';
+				e.preventDefault();
+				e.stopPropagation();
+			}
 		},
 		/**
 		 * Send team to sim server
@@ -893,7 +966,7 @@ function toId() {
 					var replayLink = 'https://' + Config.routes.replays + '/' + replayid;
 					$.ajax(replayLink + '.json', {dataType: 'json'}).done(function (replay) {
 						if (replay) {
-							var title = BattleLog.escapeHTML(replay.p1) + ' vs. ' + BattleLog.escapeHTML(replay.p2);
+							var title = replay.p1 + ' vs. ' + replay.p2;
 							app.receive('>battle-' + replayid + '\n|init|battle\n|title|' + title + '\n' + replay.log);
 							app.receive('>battle-' + replayid + '\n|expire|<a href=' + replayLink + ' target="_blank" class="no-panel-intercept">Open replay in new tab</a>');
 						} else {
@@ -1014,6 +1087,7 @@ function toId() {
 				}
 				if (app.ignore[userid]) {
 					delete app.ignore[userid];
+					app.saveIgnore();
 				}
 				break;
 
@@ -1114,6 +1188,18 @@ function toId() {
 				break;
 			}
 		},
+		saveIgnore: function () {
+			Storage.prefs('ignorelist', Object.keys(this.ignore));
+		},
+		loadIgnore: function () {
+			var ignoreList = Storage.prefs('ignorelist');
+			if (!ignoreList) return {};
+			var ignore = {};
+			for (var i = 0; i < ignoreList.length; i++) {
+				ignore[ignoreList[i]] = 1;
+			}
+			return ignore;
+		},
 		parseGroups: function (groupsList) {
 			var data = null;
 			try {
@@ -1150,6 +1236,7 @@ function toId() {
 			var column = 0;
 			var columnChanged = false;
 
+			window.NonBattleGames = {rps: 'Rock Paper Scissors'};
 			window.BattleFormats = {};
 			for (var j = 1; j < formatsList.length; j++) {
 				if (isSection) {
@@ -1172,6 +1259,7 @@ function toId() {
 					var searchShow = true;
 					var challengeShow = true;
 					var tournamentShow = true;
+					var partner = false;
 					var team = null;
 					var teambuilderLevel = null;
 					var lastCommaIndex = name.lastIndexOf(',');
@@ -1183,6 +1271,7 @@ function toId() {
 						if (!(code & 4)) challengeShow = false;
 						if (!(code & 8)) tournamentShow = false;
 						if (code & 16) teambuilderLevel = 50;
+						if (code & 32) partner = true;
 					} else {
 						// Backwards compatibility: late 0.9.0 -> 0.10.0
 						if (name.substr(name.length - 2) === ',#') { // preset teams
@@ -1213,6 +1302,8 @@ function toId() {
 						}
 						if (teambuilderFormatName !== name) {
 							teambuilderFormat = toID(teambuilderFormatName);
+							if (teambuilderFormat.startsWith('gen8nd')) teambuilderFormat = 'gen8nationaldex' + teambuilderFormat.slice(6);
+							if (teambuilderFormat.startsWith('gen8natdex')) teambuilderFormat = 'gen8nationaldex' + teambuilderFormat.slice(10);
 							if (BattleFormats[teambuilderFormat]) {
 								BattleFormats[teambuilderFormat].isTeambuilderFormat = true;
 							} else {
@@ -1246,6 +1337,7 @@ function toId() {
 						tournamentShow: tournamentShow,
 						rated: searchShow && id.substr(4, 7) !== 'unrated',
 						teambuilderLevel: teambuilderLevel,
+						partner: partner,
 						teambuilderFormat: teambuilderFormat,
 						isTeambuilderFormat: isTeambuilderFormat,
 						effectType: 'Format'
@@ -1476,9 +1568,9 @@ function toId() {
 
 			// otherwise, infer the room type
 			if (!type) {
-				if (id.slice(0, 7) === 'battle-') {
+				if (id.startsWith('battle-') || id.startsWith('game-')) {
 					type = BattleRoom;
-				} else if (id.slice(0, 5) === 'view-') {
+				} else if (id.startsWith('view-')) {
 					type = HTMLRoom;
 				} else {
 					type = ChatRoom;
@@ -2353,7 +2445,7 @@ function toId() {
 		},
 		initialize: function (data) {
 			if (!this.type) this.type = 'semimodal';
-			this.$el.html('<form><p style="white-space:pre-wrap;word-wrap:break-word">' + (data.htmlMessage || BattleLog.parseMessage(data.message)) + '</p><p class="buttonbar">' + (data.buttons || '<button name="close" class="autofocus"><strong>OK</strong></button>') + '</p></form>').css('max-width', data.maxWidth || 480);
+			this.$el.html('<form><p style="white-space:pre-wrap;word-wrap:break-word">' + (data.htmlMessage || BattleLog.parseMessage(data.message)) + '</p><p class="buttonbar">' + (data.buttons || '<button type="button" name="close" class="autofocus"><strong>OK</strong></button>') + '</p></form>').css('max-width', data.maxWidth || 480);
 		},
 
 		dispatchClickButton: function (e) {
@@ -2417,7 +2509,7 @@ function toId() {
 			var buf = '<form>';
 			buf += '<p><label class="label">' + data.message;
 			buf += '<input class="textbox autofocus" type="text" name="data" value="' + BattleLog.escapeHTML(data.value || '') + '" /></label></p>';
-			buf += '<p class="buttonbar"><button type="submit"><strong>' + data.button + '</strong></button> <button name="close">Cancel</button></p>';
+			buf += '<p class="buttonbar"><button type="submit"><strong>' + data.button + '</strong></button> <button type="button" name="close">Cancel</button></p>';
 			buf += '</form>';
 
 			this.$el.html(buf);
@@ -2459,39 +2551,44 @@ function toId() {
 			type: 'staff',
 			order: 10006
 		},
+		'\u00a7': {
+			name: "Section Leader (\u00a7)",
+			type: 'staff',
+			order: 10007
+		},
 		'*': {
 			name: "Bot (*)",
 			type: 'normal',
-			order: 10007
+			order: 10008
 		},
 		'\u2606': {
 			name: "Player (\u2606)",
 			type: 'normal',
-			order: 10008
+			order: 10009
 		},
 		'+': {
 			name: "Voice (+)",
 			type: 'normal',
-			order: 10009
+			order: 10010
 		},
 		' ': {
 			type: 'normal',
-			order: 10010
+			order: 10011
 		},
 		'!': {
 			name: "<span style='color:#777777'>Muted (!)</span>",
 			type: 'punishment',
-			order: 10011
+			order: 10012
 		},
 		'✖': {
 			name: "<span style='color:#777777'>Namelocked (✖)</span>",
 			type: 'punishment',
-			order: 10012
+			order: 10013
 		},
 		'\u203d': {
 			name: "<span style='color:#777777'>Locked (\u203d)</span>",
 			type: 'punishment',
-			order: 10013
+			order: 10014
 		}
 	};
 
@@ -2524,7 +2621,7 @@ function toId() {
 			var groupName = ((Config.groups[data.roomGroup] || {}).name || '');
 			var globalGroup = (Config.groups[data.group || Config.defaultGroup || ' '] || null);
 			var globalGroupName = '';
-			if (globalGroup && globalGroup.name) {
+			if (globalGroup && globalGroup.name && toID(globalGroup.name) !== toID(data.customgroup)) {
 				if (globalGroup.type === 'punishment') {
 					groupName = globalGroup.name;
 				} else if (!groupName || groupName === globalGroup.name) {
@@ -2549,6 +2646,10 @@ function toId() {
 			}
 			if (globalGroupName) {
 				buf += '<small class="usergroup globalgroup">' + globalGroupName + '</small>';
+			}
+			if (data.customgroup && toID(data.customgroup) !== toID(globalGroupName || groupName)) {
+				if (groupName || globalGroupName) buf += '<br />';
+				buf += '<small class="usergroup globalgroup">' + BattleLog.escapeHTML(data.customgroup) + '</small>';
 			}
 			if (data.rooms) {
 				var battlebuf = '';
@@ -2668,6 +2769,7 @@ function toId() {
 				app.ignore[this.userid] = 1;
 				buf += " ignored. (Moderator messages will not be ignored.)";
 			}
+			app.saveIgnore();
 			var $pm = $('.pm-window-' + this.userid);
 			if ($pm.length && $pm.css('display') !== 'none') {
 				$pm.find('.inner').append('<div class="chat">' + BattleLog.escapeHTML(buf) + '</div>');
@@ -2701,10 +2803,10 @@ function toId() {
 				}
 			} else if (data.message && data.message !== true) {
 				buf += '<p>' + data.message + '</p>';
-				buf += '<p class="buttonbar"><button type="submit" class="autofocus"><strong>Reconnect</strong></button> <button name="close">Work offline</button></p>';
+				buf += '<p class="buttonbar"><button type="submit" class="autofocus"><strong>Reconnect</strong></button> <button type="button" name="close">Work offline</button></p>';
 			} else {
 				buf += '<p>You have been disconnected &ndash; possibly because the server was restarted.</p>';
-				buf += '<p class="buttonbar"><button type="submit" class="autofocus"><strong>Reconnect</strong></button> <button name="close">Work offline</button></p>';
+				buf += '<p class="buttonbar"><button type="submit" class="autofocus"><strong>Reconnect</strong></button> <button type="button" name="close">Work offline</button></p>';
 			}
 
 			buf += '</form>';
@@ -2730,7 +2832,7 @@ function toId() {
 			buf += '<p>Please copy <strong>all the text</strong> from the box above and paste it in the box below.</p>';
 			buf += '<p>(You should probably <a href="https://github.com/smogon/pokemon-showdown-client#test-keys" target="_blank">set up</a> <code>config/testclient-key.js</code> so you don\'t have to do this every time.)</p>';
 			buf += '<p><label class="label" style="float: left;">Data from the box above:</label> <input style="width: 100%;" class="textbox autofocus" type="text" name="result" /></p>';
-			buf += '<p class="buttonbar"><button type="submit"><strong>Submit</strong></button> <button name="close">Cancel</button></p>';
+			buf += '<p class="buttonbar"><button type="submit"><strong>Submit</strong></button> <button type="button" name="close">Cancel</button></p>';
 			buf += '</form>';
 			this.$el.html(buf).css('min-width', 500);
 		},

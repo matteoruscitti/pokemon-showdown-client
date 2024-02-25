@@ -636,11 +636,17 @@ Storage.unpackAllTeams = function (buffer) {
 		// old format
 		return JSON.parse(buffer).map(function (oldTeam) {
 			var format = oldTeam.format || 'gen8';
+			var capacity = 6;
 			if (format && format.slice(0, 3) !== 'gen') format = 'gen6' + format;
+			if (format && format.endsWith('-box')) {
+				format = format.slice(0, -4);
+				capacity = 24;
+			}
 			return {
 				name: oldTeam.name || '',
 				format: format,
 				team: Storage.packTeam(oldTeam.team),
+				capacity: capacity,
 				folder: '',
 				iconCache: ''
 			};
@@ -655,14 +661,16 @@ Storage.unpackLine = function (line) {
 	if (pipeIndex < 0) return null;
 	var bracketIndex = line.indexOf(']');
 	if (bracketIndex > pipeIndex) bracketIndex = -1;
+	var isBox = line.slice(0, bracketIndex).endsWith('-box');
 	var slashIndex = line.lastIndexOf('/', pipeIndex);
 	if (slashIndex < 0) slashIndex = bracketIndex; // line.slice(slashIndex + 1, pipeIndex) will be ''
-	var format = bracketIndex > 0 ? line.slice(0, bracketIndex) : 'gen8';
+	var format = bracketIndex > 0 ? line.slice(0, isBox ? bracketIndex - 4 : bracketIndex) : 'gen8';
 	if (format && format.slice(0, 3) !== 'gen') format = 'gen6' + format;
 	return {
 		name: line.slice(slashIndex + 1, pipeIndex),
 		format: format,
 		team: line.slice(pipeIndex + 1),
+		capacity: isBox ? 24 : 6,
 		folder: line.slice(bracketIndex + 1, slashIndex > 0 ? slashIndex : bracketIndex + 1),
 		iconCache: ''
 	};
@@ -670,7 +678,7 @@ Storage.unpackLine = function (line) {
 
 Storage.packAllTeams = function (teams) {
 	return teams.map(function (team) {
-		return (team.format ? '' + team.format + ']' : '') + (team.folder ? '' + team.folder + '/' : '') + team.name + '|' + Storage.getPackedTeam(team);
+		return (team.format ? '' + team.format + (team.capacity === 24 ? '-box]' : ']') : '') + (team.folder ? '' + team.folder + '/' : '') + team.name + '|' + Storage.getPackedTeam(team);
 	}).join('\n');
 };
 
@@ -798,7 +806,7 @@ Storage.fastUnpackTeam = function (buf) {
 		// ability
 		j = buf.indexOf('|', i);
 		var ability = buf.substring(i, j);
-		var species = Dex.getSpecies(set.species);
+		var species = Dex.species.get(set.species);
 		if (species.baseSpecies === 'Zygarde' && ability === 'H') ability = 'Power Construct';
 		set.ability = (species.abilities && ['', '0', '1', 'H', 'S'].includes(ability) ? species.abilities[ability] || '!!!ERROR!!!' : ability);
 		i = j + 1;
@@ -902,25 +910,25 @@ Storage.unpackTeam = function (buf) {
 
 		// species
 		j = buf.indexOf('|', i);
-		set.species = Dex.getSpecies(buf.substring(i, j)).name || set.name;
+		set.species = Dex.species.get(buf.substring(i, j)).name || set.name;
 		i = j + 1;
 
 		// item
 		j = buf.indexOf('|', i);
-		set.item = Dex.getItem(buf.substring(i, j)).name;
+		set.item = Dex.items.get(buf.substring(i, j)).name;
 		i = j + 1;
 
 		// ability
 		j = buf.indexOf('|', i);
-		var ability = Dex.getAbility(buf.substring(i, j)).name;
-		var species = Dex.getSpecies(set.species);
+		var ability = Dex.abilities.get(buf.substring(i, j)).name;
+		var species = Dex.species.get(set.species);
 		set.ability = (species.abilities && ability in {'':1, 0:1, 1:1, H:1} ? species.abilities[ability || '0'] : ability);
 		i = j + 1;
 
 		// moves
 		j = buf.indexOf('|', i);
 		set.moves = buf.substring(i, j).split(',').map(function (moveid) {
-			return Dex.getMove(moveid).name;
+			return Dex.moves.get(moveid).name;
 		});
 		i = j + 1;
 
@@ -1092,10 +1100,15 @@ Storage.importTeam = function (buffer, teams) {
 			team = [];
 			line = $.trim(line.substr(3, line.length - 6));
 			var format = 'gen8';
+			var capacity = 6;
 			var bracketIndex = line.indexOf(']');
 			if (bracketIndex >= 0) {
 				format = line.substr(1, bracketIndex - 1);
 				if (format && format.slice(0, 3) !== 'gen') format = 'gen6' + format;
+				if (format && format.endsWith('-box')) {
+					format = format.slice(0, -4);
+					capacity = 24;
+				}
 				line = $.trim(line.substr(bracketIndex + 1));
 			}
 			if (teams.length && typeof teams[teams.length - 1].team !== 'string') {
@@ -1111,6 +1124,7 @@ Storage.importTeam = function (buffer, teams) {
 				name: line,
 				format: format,
 				team: team,
+				capacity: capacity,
 				folder: folder,
 				iconCache: ''
 			});
@@ -1138,11 +1152,11 @@ Storage.importTeam = function (buffer, teams) {
 			var parenIndex = line.lastIndexOf(' (');
 			if (line.substr(line.length - 1) === ')' && parenIndex !== -1) {
 				line = line.substr(0, line.length - 1);
-				curSet.species = Dex.getSpecies(line.substr(parenIndex + 2)).name;
+				curSet.species = Dex.species.get(line.substr(parenIndex + 2)).name;
 				line = line.substr(0, parenIndex);
 				curSet.name = line;
 			} else {
-				curSet.species = Dex.getSpecies(line).name;
+				curSet.species = Dex.species.get(line).name;
 				curSet.name = '';
 			}
 		} else if (line.substr(0, 7) === 'Trait: ') {
@@ -1207,10 +1221,11 @@ Storage.importTeam = function (buffer, teams) {
 			if (line.substr(0, 14) === 'Hidden Power [') {
 				var hptype = line.substr(14, line.length - 15);
 				line = 'Hidden Power ' + hptype;
-				if (!curSet.ivs && window.BattleTypeChart && window.BattleTypeChart[hptype]) {
+				var type = Dex.types.get(hptype);
+				if (!curSet.ivs && type) {
 					curSet.ivs = {};
-					for (var stat in window.BattleTypeChart[hptype].HPivs) {
-						curSet.ivs[stat] = window.BattleTypeChart[hptype].HPivs[stat];
+					for (var stat in type.HPivs) {
+						curSet.ivs[stat] = type.HPivs[stat];
 					}
 				}
 			}
@@ -1229,7 +1244,7 @@ Storage.exportAllTeams = function () {
 	var buf = '';
 	for (var i = 0, len = Storage.teams.length; i < len; i++) {
 		var team = Storage.teams[i];
-		buf += '=== ' + (team.format ? '[' + team.format + '] ' : '') + (team.folder ? '' + team.folder + '/' : '') + team.name + ' ===\n\n';
+		buf += '=== ' + (team.format ? '[' + team.format + (team.capacity === 24 ? '-box] ' : '] ') : '') + (team.folder ? '' + team.folder + '/' : '') + team.name + ' ===\n\n';
 		buf += Storage.exportTeam(team.team);
 		buf += '\n';
 	}
@@ -1240,7 +1255,7 @@ Storage.exportFolder = function (folder) {
 	for (var i = 0, len = Storage.teams.length; i < len; i++) {
 		var team = Storage.teams[i];
 		if (team.folder + "/" === folder || team.format === folder) {
-			buf += '=== ' + (team.format ? '[' + team.format + '] ' : '') + (team.folder ? '' + team.folder + '/' : '') + team.name + ' ===\n\n';
+			buf += '=== ' + (team.format ? '[' + team.format + (team.capacity === 24 ? '-box] ' : '] ') : '') + (team.folder ? '' + team.folder + '/' : '') + team.name + ' ===\n\n';
 			buf += Storage.exportTeam(team.team);
 			buf += '\n';
 		}
@@ -1315,12 +1330,12 @@ Storage.exportTeam = function (team) {
 				var move = curSet.moves[j];
 				if (move.substr(0, 13) === 'Hidden Power ' && move.substr(0, 14) !== 'Hidden Power [') {
 					hpType = move.substr(13);
-					if (!exports.BattleTypeChart[hpType].HPivs) {
-						alert("That is not a valid Hidden Power type.");
+					if (!Dex.types.isName(hpType)) {
+						alert(move + " is not a valid Hidden Power type.");
 						continue;
 					}
 					for (var stat in BattleStatNames) {
-						if ((curSet.ivs[stat] === undefined ? 31 : curSet.ivs[stat]) !== (exports.BattleTypeChart[hpType].HPivs[stat] || 31)) {
+						if ((curSet.ivs[stat] === undefined ? 31 : curSet.ivs[stat]) !== (Dex.types.get(hpType).HPivs[stat] || 31)) {
 							defaultIvs = false;
 							break;
 						}
@@ -1518,19 +1533,26 @@ Storage.nwLoadTeamFile = function (filename, localApp) {
 		return;
 	}
 
-	var format = '';
+	var format = 'gen8';
+	var capacity = 6;
 	var bracketIndex = line.indexOf(']');
 	if (bracketIndex >= 0) {
 		format = line.slice(1, bracketIndex);
+		if (format && !format.startsWith('gen')) format = 'gen6' + format;
+		if (format && /^gen6gen[0-9]/.test(format)) format = format.slice(4);
+		if (format && format.endsWith('-box')) {
+			format = format.slice(0, -4);
+			capacity = 24;
+		}
 		line = $.trim(line.slice(bracketIndex + 1));
 	}
-	if (format && format.slice(0, 3) !== 'gen') format = 'gen6' + format;
 	fs.readFile(this.dir + 'Teams/' + filename, function (err, data) {
 		if (!err) {
 			self.teams.push({
 				name: line,
 				format: format,
 				team: Storage.packTeam(Storage.importTeam('' + data)),
+				capacity: capacity,
 				folder: folder,
 				iconCache: '',
 				filename: filename
@@ -1604,7 +1626,7 @@ Storage.nwDeleteTeamFile = function (filename, callback) {
 Storage.nwSaveTeam = function (team) {
 	if (!team) return;
 	var filename = team.name + '.txt';
-	if (team.format) filename = '[' + team.format + '] ' + filename;
+	if (team.format) filename = '[' + team.format + (team.capacity === 24 ? '-box] ' : '] ') + filename;
 	filename = filename.trim().replace(/[\\\/]+/g, '');
 	if (team.folder) filename = '' + team.folder.replace(/[\\\/]+/g, '') + '/' + filename;
 
@@ -1652,7 +1674,7 @@ Storage.nwDoSaveAllTeams = function () {
 	for (var i = 0; i < this.teams.length; i++) {
 		var team = this.teams[i];
 		var filename = team.name + '.txt';
-		if (team.format) filename = '[' + team.format + '] ' + filename;
+		if (team.format) filename = '[' + team.format + (team.capacity === 24 ? '-box] ' : '] ') + filename;
 		filename = $.trim(filename).replace(/[\\\/]+/g, '');
 
 		team.filename = filename;

@@ -92,7 +92,8 @@
 				return buf + ' aria-label="Join chatroom"><i class="fa fa-plus" style="margin:7px auto -6px auto"></i> <span>&nbsp;</span></a></li>';
 			case 'battle':
 				var name = BattleLog.escapeHTML(room.title);
-				var idChunks = id.substr(7).split('-');
+				var offset = id.startsWith('game-') ? 5 : 7;
+				var idChunks = id.substr(offset).split('-');
 				var formatid;
 				if (idChunks.length <= 1) {
 					if (idChunks[0] === 'uploadedreplay') formatid = 'Uploaded Replay';
@@ -686,6 +687,7 @@
 
 			buf += '<div class="avatarlist">';
 			for (var i = 1; i <= 293; i++) {
+				if (i === 162 || i === 168) continue;
 				var offset = '-' + (((i - 1) % 16) * 80 + 1) + 'px -' + (Math.floor((i - 1) / 16) * 80 + 1) + 'px';
 				buf += '<button name="setAvatar" value="' + i + '" style="background-position:' + offset + '"' + (i === cur ? ' class="cur"' : '') + ' title="/avatar ' + i + '"></button>';
 			}
@@ -856,7 +858,7 @@
 				if (noRenameGames) {
 					buf += '<p>You can\'t change name in the middle of these games:</p>';
 					buf += '<ul>' + noRenameGames + '</ul>';
-					buf += '<p class="buttonbar"><button name="force"><small style="color:red">Forfeit and change name</small></button></p>';
+					buf += '<p class="buttonbar"><button type="button" name="force"><small style="color:red">Forfeit and change name</small></button></p>';
 					buf += '<p class="buttonbar"><button type="submit" autofocus><strong>Cancel</strong></button></p>';
 					buf += '</form>';
 					this.$el.html(buf);
@@ -870,7 +872,7 @@
 			if (name) {
 				buf += '<p><small>(Others will be able to see your name change. To change name privately, use "Log out")</small></p>';
 			}
-			buf += '<p class="buttonbar"><button type="submit"><strong>Choose name</strong></button> <button name="close">Cancel</button></p>';
+			buf += '<p class="buttonbar"><button type="submit"><strong>Choose name</strong></button> <button type="button" name="close">Cancel</button></p>';
 
 			buf += '</form>';
 			this.$el.html(buf);
@@ -913,7 +915,7 @@
 			buf += '<p><label class="label">Old password: <input class="textbox autofocus" type="password" name="oldpassword" autocomplete="current-password" /></label></p>';
 			buf += '<p><label class="label">New password: <input class="textbox" type="password" name="password" autocomplete="new-password" /></label></p>';
 			buf += '<p><label class="label">New password (confirm): <input class="textbox" type="password" name="cpassword" autocomplete="new-password" /></label></p>';
-			buf += '<p class="buttonbar"><button type="submit"><strong>Change password</strong></button> <button name="close">Cancel</button></p></form>';
+			buf += '<p class="buttonbar"><button type="submit"><strong>Change password</strong></button> <button type="button" name="close">Cancel</button></p></form>';
 			this.$el.html(buf);
 		},
 		submit: function (data) {
@@ -951,7 +953,7 @@
 			buf += '<p><label class="label">Password (confirm): <input class="textbox" type="password" name="cpassword" autocomplete="new-password" /></label></p>';
 			buf += '<p><label class="label"><img src="' + Dex.resourcePrefix + 'sprites/gen5ani/pikachu.gif" alt="An Electric-type mouse that is the mascot of the Pok\u00E9mon franchise." /></label></p>';
 			buf += '<p><label class="label">What is this pokemon? <input class="textbox" type="text" name="captcha" value="' + BattleLog.escapeHTML(data.captcha) + '" /></label></p>';
-			buf += '<p class="buttonbar"><button type="submit"><strong>Register</strong></button> <button name="close">Cancel</button></p></form>';
+			buf += '<p class="buttonbar"><button type="submit"><strong>Register</strong></button> <button type="button" name="close">Cancel</button></p></form>';
 			this.$el.html(buf);
 		},
 		submit: function (data) {
@@ -985,6 +987,19 @@
 
 	this.LoginPasswordPopup = Popup.extend({
 		type: 'semimodal',
+		showPassword: function () {
+			var $button = this.$('button[name=showPassword]');
+			var $password = this.$('input[name=password]');
+			if ($password.attr('type') === "password") {
+				$password.attr('type', 'text');
+				$button.attr('aria-label', "Hide password");
+				$button.html('<i class="fa fa-eye-slash"></i>');
+			} else {
+				$password.attr('type', 'password');
+				$button.attr('aria-label', "Show password");
+				$button.html('<i class="fa fa-eye"></i>');
+			}
+		},
 		initialize: function (data) {
 			var buf = '<form>';
 
@@ -1010,13 +1025,13 @@
 				buf += '<div id="gapi-custom-signin" style="width:240px;margin:0 auto">[loading Google log-in button]</div>';
 				buf += '<p class="buttonbar"><button name="close">Cancel</button></p>';
 			} else {
-				buf += '<p><label class="label">Password: <input class="textbox autofocus" type="password" name="password" autocomplete="current-password"></label></p>';
-				buf += '<p class="buttonbar"><button type="submit"><strong>Log in</strong></button> <button name="close">Cancel</button></p>';
+				buf += '<p><label class="label">Password: <input class="textbox autofocus" type="password" name="password" autocomplete="current-password" style="width:173px"><button type="button" name="showPassword" aria-label="Show password" style="float:right;margin:-21px 0 10px;padding: 2px 6px" class="button"><i class="fa fa-eye"></i></button></label></p>';
+				buf += '<p class="buttonbar"><button type="submit"><strong>Log in</strong></button> <button type="button" name="close">Cancel</button></p>';
 			}
 
 			buf += '<p class="or">or</p>';
 			buf += '<p>If this is someone else\'s account:</p>';
-			buf += '<p class="buttonbar"><button name="login">Choose another name</button></p>';
+			buf += '<p class="buttonbar"><button type="button" name="login">Choose another name</button></p>';
 
 			buf += '</form>';
 			this.$el.html(buf);
